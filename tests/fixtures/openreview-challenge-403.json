@@ -1,0 +1,9 @@
+{
+  "name": "ChallengeRequiredError",
+  "message": "Challenge verification required (2026-11-08-12036887)",
+  "status": 403,
+  "details": {
+    "challengeUrl": "https://openreview.net/challenge?redirect=https%3A%2F%2Fapi2.openreview.net%2Fnotes%3Fforum%3DrJXMpikCZ",
+    "reqId": "2026-11-08-12036887"
+  }
+}

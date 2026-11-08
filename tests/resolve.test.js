@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   detectIdentifier, resolveReference, ResolveError,
-  fromCrossref, fromDatacite, fromArxivAtom, fromSemanticScholar, fromOpenReview,
+  fromCrossref, fromDatacite, fromDataciteArxiv, fromCsl, fromArxivAtom, fromSemanticScholar, fromOpenReview,
   fromPubmedSummary, fromOpenLibrary, fromHtmlMeta,
   canonicalUrl, todayIso, fetchJson, fetchText, parseXml, scanHtml, decodeEntities,
   parseFullName, parseDate,
@@ -292,6 +292,36 @@ describe('fromCrossref', () => {
     assert.equal(ref.year, 2017);
   });
 
+  test('Springer chapter with the series listed first (real PubMed 31452104 -> Crossref order)', () => {
+    const ref = fromCrossref({
+      type: 'book-chapter', title: ['Molegro Virtual Docker for Docking'], DOI: '10.1007/978-1-4939-9752-7_10',
+      'container-title': ['Methods in Molecular Biology', 'Docking Screens for Drug Discovery'], issued: { 'date-parts': [[2019]] },
+      author: [{ given: 'Gabriela', family: 'Bitencourt-Ferreira' }, { given: 'Walter Filgueira', family: 'de Azevedo', suffix: 'Jr.' }],
+      page: '149-167', publisher: 'Springer New York',
+    });
+    assert.equal(ref.type, 'chapter');
+    assert.equal(ref.containerTitle, 'Docking Screens for Drug Discovery');
+    assert.equal(ref.collectionTitle, 'Methods in Molecular Biology');
+    assert.deepEqual(ref.author[1], n('de Azevedo', 'Walter Filgueira', { suffix: 'Jr.' }));
+    const noHint = fromCrossref({ type: 'book-chapter', 'container-title': ['Some Series', 'Some Book'] });
+    assert.equal(noHint.containerTitle, 'Some Book');
+    assert.equal(noHint.collectionTitle, 'Some Series');
+  });
+
+  test('Springer LNCS chapter (real): series and book split, ISBN, pages', () => {
+    const ref = fromCrossref(json('crossref-book-chapter.json').message);
+    assert.equal(ref.type, 'chapter');
+    assert.equal(ref.title, 'SSD: Single Shot MultiBox Detector');
+    assert.equal(ref.containerTitle, 'Computer Vision – ECCV 2016');
+    assert.equal(ref.collectionTitle, 'Lecture Notes in Computer Science');
+    assert.equal(ref.author.length, 7);
+    assert.deepEqual(ref.author[6], n('Berg', 'Alexander C.'));
+    assert.equal(ref.page, '21-37');
+    assert.equal(ref.publisher, 'Springer International Publishing');
+    assert.equal(ref.isbn, '9783319464473');
+    assert.equal(ref.year, 2016);
+  });
+
   test('subtitle already contained in title is not duplicated; JATS tags stripped', () => {
     const ref = fromCrossref({
       type: 'journal-article', title: ['Deep <i>learning</i>: a &amp; b'], subtitle: ['A &amp; B'],
@@ -344,7 +374,18 @@ describe('fromDatacite', () => {
     assert.equal(ref.year, 2017);
     assert.equal(ref.publisher, 'arXiv');
     assert.equal(ref.url, 'https://arxiv.org/abs/1706.03762');
-    assert.equal(ref.doi, '10.48550/arxiv.1706.03762');
+    assert.equal(ref.doi, '10.48550/arXiv.1706.03762', 'DataCite lower-cases the DOI; it is normalised');
+  });
+
+  test('Zenodo software record (real): version kept, team as sole author', () => {
+    const ref = fromDatacite(json('datacite-zenodo-software.json').data.attributes);
+    assert.equal(ref.type, 'software');
+    assert.equal(ref.title, 'pandas-dev/pandas: Pandas');
+    assert.equal(ref.version, 'v3.1.1');
+    assert.equal(ref.publisher, 'Zenodo');
+    assert.deepEqual([ref.year, ref.month, ref.day], [2026, 11, 4]);
+    assert.equal(ref.author.length, 1);
+    assert.equal(ref.doi, '10.5281/zenodo.3509134');
   });
 
   test('dataset with organisational creator, container and publisher object', () => {
@@ -367,6 +408,93 @@ describe('fromDatacite', () => {
   test('never throws on malformed input', () => {
     assert.deepEqual(fromDatacite(undefined), { type: 'generic', author: [] });
     assert.equal(fromDatacite({ types: 'x', titles: 'y', creators: 7 }).type, 'generic');
+  });
+});
+
+describe('fromDataciteArxiv', () => {
+  test('real DataCite record -> preprint dated by the earliest Submitted date (v1)', () => {
+    const ref = fromDataciteArxiv(json('datacite-arxiv.json').data.attributes, '1706.03762');
+    assert.equal(ref.type, 'preprint');
+    assert.equal(ref.archive, 'arXiv');
+    assert.equal(ref.archiveId, '1706.03762');
+    assert.equal(ref.title, 'Attention Is All You Need');
+    assert.equal(ref.author.length, 8);
+    assert.deepEqual(ref.author[0], n('Vaswani', 'Ashish'));
+    assert.deepEqual(ref.author[5], n('Gomez', 'Aidan N.'));
+    assert.deepEqual([ref.year, ref.month, ref.day], [2017, 6, 12], 'v1 submission date, not the 2023 v7 revision');
+    assert.equal(ref.doi, '10.48550/arXiv.1706.03762');
+    assert.equal(ref.url, 'https://arxiv.org/abs/1706.03762');
+    assert.equal(ref.containerTitle, undefined);
+  });
+
+  test('id derived from the DOI; publicationYear fallback; organisational creator', () => {
+    const ref = fromDataciteArxiv({
+      doi: '10.48550/arxiv.2401.00001', titles: [{ title: 'T' }], publicationYear: 2024, dates: [{ date: '2024', dateType: 'Issued' }],
+      creators: [{ name: 'OpenAI', nameType: 'Organizational' }, { givenName: 'Ada', familyName: 'Lovelace', nameType: 'Personal' }],
+      publisher: 'arXiv', types: { resourceTypeGeneral: 'Preprint' },
+    });
+    assert.equal(ref.archiveId, '2401.00001');
+    assert.equal(ref.doi, '10.48550/arXiv.2401.00001');
+    assert.deepEqual([ref.year, ref.month], [2024, undefined]);
+    assert.deepEqual(ref.author, [{ literal: 'OpenAI' }, n('Lovelace', 'Ada')]);
+    assert.equal(fromDataciteArxiv(null, 'hep-th/9901001').archiveId, 'hep-th/9901001');
+    assert.equal(fromDataciteArxiv(undefined).type, 'preprint');
+  });
+});
+
+describe('fromCsl', () => {
+  test('Crossref CSL-JSON for the Nature article (real doi.org body)', () => {
+    const ref = fromCsl(json('csl-nature14539.json'));
+    assert.equal(ref.type, 'article-journal');
+    assert.equal(ref.title, 'Deep learning');
+    assert.deepEqual(ref.author, [n('LeCun', 'Yann'), n('Bengio', 'Yoshua'), n('Hinton', 'Geoffrey')]);
+    assert.equal(ref.containerTitle, 'Nature');
+    assert.equal(ref.volume, '521');
+    assert.equal(ref.issue, '7553');
+    assert.equal(ref.page, '436-444');
+    assert.deepEqual([ref.year, ref.month, ref.day], [2015, 5, 27]);
+    assert.equal(ref.doi, '10.1038/nature14539');
+    assert.equal(ref.url, 'https://doi.org/10.1038/nature14539');
+    assert.equal(ref.publisher, 'Springer Science and Business Media LLC');
+  });
+
+  test('DataCite CSL-JSON: software with a team author, arXiv "article" -> preprint', () => {
+    const sw = fromCsl(json('csl-zenodo-software.json'));
+    assert.equal(sw.type, 'software');
+    assert.equal(sw.title, 'pandas-dev/pandas: Pandas');
+    assert.deepEqual(sw.author, [{ literal: 'The pandas development team' }]);
+    assert.equal(sw.version, 'v3.1.1');
+    assert.equal(sw.publisher, 'Zenodo');
+    assert.equal(sw.url, 'https://zenodo.org/doi/10.5281/zenodo.3509134');
+    assert.deepEqual([sw.year, sw.month, sw.day], [2026, 11, 4]);
+    const ax = fromCsl(json('csl-arxiv-1706.03762.json'));
+    assert.equal(ax.type, 'preprint');
+    assert.equal(ax.archive, 'arXiv');
+    assert.equal(ax.archiveId, '1706.03762');
+    assert.equal(ax.doi, '10.48550/arXiv.1706.03762');
+    assert.equal(ax.url, 'https://arxiv.org/abs/1706.03762');
+    assert.equal(ax.author.length, 8);
+    assert.equal(ax.year, 2017);
+  });
+
+  test('type map, literal authors, event title, thesis/report institution, malformed input', () => {
+    assert.equal(fromCsl({ type: 'paper-conference', title: 'P', 'event-title': 'NeurIPS 2020' }).containerTitle, 'NeurIPS 2020');
+    assert.equal(fromCsl({ type: 'book', title: ['B'], ISBN: ['123'] }).isbn, '123');
+    assert.equal(fromCsl({ type: 'chapter', 'container-title': 'Big Book' }).containerTitle, 'Big Book');
+    const thesis = fromCsl({ type: 'thesis', publisher: 'MIT', genre: 'PhD thesis' });
+    assert.equal(thesis.type, 'thesis');
+    assert.equal(thesis.institution, 'MIT');
+    assert.equal(thesis.genre, 'PhD thesis');
+    assert.equal(fromCsl({ type: 'report', number: 'TR-1' }).number, 'TR-1');
+    assert.equal(fromCsl({ type: 'dataset' }).type, 'dataset');
+    assert.equal(fromCsl({ type: 'webpage' }).type, 'webpage');
+    assert.equal(fromCsl({ type: 'post-weblog' }).type, 'webpage');
+    assert.equal(fromCsl({ type: 'article', 'container-title': 'J' }).type, 'article-journal');
+    assert.equal(fromCsl({ type: 'article' }).type, 'generic');
+    assert.deepEqual(fromCsl({ author: [{ literal: 'WHO' }, { family: 'Plato' }, { family: 'van der Maaten', given: 'L' }] }).author,
+      [{ literal: 'WHO' }, { family: 'Plato' }, n('van der Maaten', 'L')]);
+    assert.deepEqual(fromCsl(null), { type: 'generic', author: [] });
+    assert.deepEqual(fromCsl([]), { type: 'generic', author: [] });
   });
 });
 
@@ -551,6 +679,21 @@ describe('fromHtmlMeta', () => {
     });
   });
 
+  test('real PMLR head: 12 "Given Family" authors, conference title, volume from the path', () => {
+    const ref = fromHtmlMeta(fixture('html-pmlr-real-head.html'), 'https://proceedings.mlr.press/v139/radford21a.html', NOW);
+    assert.equal(ref.type, 'paper-conference');
+    assert.equal(ref.title, 'Learning Transferable Visual Models From Natural Language Supervision');
+    assert.equal(ref.author.length, 12);
+    assert.deepEqual(ref.author[0], n('Radford', 'Alec'));
+    assert.deepEqual(ref.author[11], n('Sutskever', 'Ilya'));
+    assert.equal(ref.containerTitle, 'International Conference on Machine Learning');
+    assert.equal(ref.volume, '139');
+    assert.equal(ref.page, '8748-8763');
+    assert.equal(ref.publisher, 'PMLR');
+    assert.deepEqual([ref.year, ref.month, ref.day], [2021, 7, 1]);
+    assert.equal(ref.url, 'https://proceedings.mlr.press/v139/radford21a.html');
+  });
+
   test('citation_* journal article with DOI, "First Last" authors', () => {
     const ref = fromHtmlMeta(fixture('html-citation-doi.html'), 'https://www.nature.com/articles/nature14539', NOW);
     assert.equal(ref.type, 'article-journal');
@@ -653,85 +796,171 @@ describe('fetchJson / fetchText', () => {
 // ---------------------------------------------------------------------------
 
 describe('resolveReference', () => {
-  const opts = (f) => ({ fetch: f, now: NOW, sleep: noSleep });
+  // Node has no `location`, so /api/meta is skipped unless metaEndpoint is given.
+  const opts = (f, extra = {}) => ({ fetch: f, now: NOW, sleep: noSleep, ...extra });
+  const META = 'https://papertools.pages.dev/api/meta';
+  const names = (r) => r.sources.map((x) => `${x.name}:${x.status}`);
 
-  test('DOI happy path via Crossref', async () => {
+  test('DOI happy path via Crossref records a single ok source', async () => {
     const f = fakeFetch([['https://api.crossref.org/works/10.1038%2Fnature14539', ok(json('crossref-journal-article.json'))]]);
     const r = await resolveReference('https://doi.org/10.1038/nature14539', opts(f));
     assert.equal(r.source, 'crossref');
     assert.equal(r.reference.title, 'Deep learning');
     assert.equal(r.identifier.kind, 'doi');
     assert.deepEqual(r.warnings, []);
+    assert.deepEqual(r.sources, [{ name: 'crossref', status: 'ok' }]);
     assert.equal(f.calls.length, 1);
+    assert.equal(f.calls[0].init.headers.Accept, 'application/json');
   });
 
-  test('DOI 404 at Crossref -> DataCite fallback with warning', async () => {
+  test('DOI 404 at Crossref (text/plain body) -> DataCite fallback with warning and sources', async () => {
     const f = fakeFetch([
-      ['https://api.crossref.org/', status(404)],
-      ['https://api.datacite.org/dois/10.48550%2FarXiv.1706.03762', ok(json('datacite-arxiv.json'))],
+      ['https://api.crossref.org/', () => ({ status: 404, text: fixture('crossref-404.txt') })],
+      ['https://api.datacite.org/dois/10.5281%2Fzenodo.3509134', ok(json('datacite-zenodo-software.json'))],
     ]);
-    const r = await resolveReference('10.48550/arXiv.1706.03762', opts(f));
+    const r = await resolveReference('10.5281/zenodo.3509134', opts(f));
     assert.equal(r.source, 'datacite');
-    assert.equal(r.reference.archiveId, '1706.03762');
-    assert.deepEqual(r.warnings, ['Crossref returned 404 for 10.48550/arXiv.1706.03762 (not found)']);
+    assert.equal(r.reference.type, 'software');
+    assert.deepEqual(r.warnings, ['Crossref returned 404 for 10.5281/zenodo.3509134 (not found)']);
+    assert.deepEqual(r.sources, [
+      { name: 'crossref', status: 'failed', detail: 'not found', message: 'Crossref returned 404 for 10.5281/zenodo.3509134 (not found)' },
+      { name: 'datacite', status: 'ok' },
+    ]);
     assert.deepEqual(f.hosts(), ['api.crossref.org', 'api.datacite.org']);
   });
 
-  test('DOI unknown everywhere -> ResolveError with partial carrying the DOI', async () => {
-    const f = fakeFetch([['https://api.crossref.org/', status(404)], ['https://api.datacite.org/', status(404)]]);
+  test('DOI unknown at Crossref and DataCite -> doi.org CSL-JSON fallback (input casing kept)', async () => {
+    const f = fakeFetch([
+      ['https://api.crossref.org/', status(404)],
+      ['https://api.datacite.org/', status(404)],
+      ['https://doi.org/10.5281/ZENODO.3509134', ok(json('csl-zenodo-software.json'))],
+    ]);
+    const r = await resolveReference('10.5281/ZENODO.3509134', opts(f));
+    assert.equal(r.source, 'doi.org');
+    assert.equal(r.reference.type, 'software');
+    assert.equal(r.reference.doi, '10.5281/ZENODO.3509134');
+    assert.equal(f.calls[2].init.headers.Accept, 'application/vnd.citationstyles.csl+json');
+    assert.deepEqual(names(r), ['crossref:failed', 'datacite:failed', 'doi.org:ok']);
+  });
+
+  test('DOI unknown everywhere -> ResolveError with partial carrying the DOI and all three sources', async () => {
+    const f = fakeFetch([['https://api.crossref.org/', status(404)], ['https://api.datacite.org/', status(404)], ['https://doi.org/', status(404)]]);
     await assert.rejects(resolveReference('10.1000/nothing', opts(f)), (e) => {
       assert.ok(e instanceof ResolveError);
-      assert.match(e.message, /DataCite returned 404/);
+      assert.match(e.message, /No metadata source knows the DOI 10\.1000\/nothing \(Crossref: not found; DataCite: not found; doi\.org: not found\)/);
       assert.equal(e.partial.source, 'url-only');
       assert.equal(e.partial.reference.doi, '10.1000/nothing');
       assert.equal(e.partial.reference.url, 'https://doi.org/10.1000/nothing');
-      assert.equal(e.partial.warnings.length, 2);
+      assert.equal(e.partial.warnings.length, 4);
+      assert.deepEqual(e.partial.sources.map((x) => x.name), ['crossref', 'datacite', 'doi.org']);
+      assert.ok(e.partial.sources.every((x) => x.status === 'failed' && x.detail === 'not found'));
       return true;
     });
   });
 
-  test('arXiv happy path; journal_ref/DOI produce a "published version" warning', async () => {
-    const f = fakeFetch([['https://export.arxiv.org/api/query?id_list=hep-th%2F9711200', text(fixture('arxiv-hep-th-9711200.atom'))]]);
-    const r = await resolveReference('https://arxiv.org/abs/hep-th/9711200v3', opts(f));
-    assert.equal(r.source, 'arxiv');
+  test('arXiv DOI skips Crossref and uses the arXiv chain (DataCite)', async () => {
+    const f = fakeFetch([['https://api.datacite.org/dois/10.48550%2FarXiv.1706.03762', ok(json('datacite-arxiv.json'))]]);
+    const r = await resolveReference('https://doi.org/10.48550/arXiv.1706.03762', opts(f));
+    assert.equal(r.source, 'datacite');
+    assert.equal(r.identifier.kind, 'doi');
     assert.equal(r.reference.type, 'preprint');
-    assert.equal(r.reference.doi, '10.1023/A:1026654312961');
-    assert.equal(r.warnings.length, 1);
-    assert.match(r.warnings[0], /A published version exists \(DOI 10\.1023\/A:1026654312961\)/);
-    assert.match(f.calls[0].init.headers.Accept, /atom/);
+    assert.equal(r.reference.archiveId, '1706.03762');
+    assert.equal(r.reference.doi, '10.48550/arXiv.1706.03762');
+    assert.deepEqual(r.sources, [{ name: 'crossref', status: 'skipped', detail: 'arXiv DOIs are registered with DataCite' }, { name: 'datacite', status: 'ok' }]);
+    assert.deepEqual(f.hosts(), ['api.datacite.org']);
   });
 
-  test('arXiv plain happy path has no warnings', async () => {
-    const f = fakeFetch([['https://export.arxiv.org/api/query?id_list=1706.03762', text(fixture('arxiv-1706.03762.atom'))]]);
+  test('arXiv happy path via DataCite: preprint dated by v1 submission, no warnings, no S2 call', async () => {
+    const f = fakeFetch([['https://api.datacite.org/dois/10.48550%2FarXiv.1706.03762', ok(json('datacite-arxiv.json'))]]);
     const r = await resolveReference('arXiv:1706.03762v5', opts(f));
+    assert.equal(r.source, 'datacite');
+    assert.equal(r.reference.type, 'preprint');
     assert.equal(r.reference.archiveId, '1706.03762');
     assert.equal(r.identifier.version, '5');
+    assert.deepEqual([r.reference.year, r.reference.month, r.reference.day], [2017, 6, 12]);
+    assert.equal(r.reference.author.length, 8);
+    assert.equal(r.reference.url, 'https://arxiv.org/abs/1706.03762');
     assert.deepEqual(r.warnings, []);
+    assert.deepEqual(r.sources, [{ name: 'datacite', status: 'ok' }]);
+    assert.deepEqual(f.hosts(), ['api.datacite.org']);
   });
 
-  test('arXiv unknown id -> Semantic Scholar fallback (no Crossref re-resolve for arXiv DOIs)', async () => {
+  test('arXiv: DataCite 404 -> Semantic Scholar ARXIV: lookup; published DOI becomes a warning, preprint is cited', async () => {
     const f = fakeFetch([
-      ['https://export.arxiv.org/', text(fixture('arxiv-error.atom'))],
+      ['https://api.datacite.org/', status(404)],
+      ['https://api.semanticscholar.org/graph/v1/paper/ARXIV:1706.03762?fields=', ok(json('s2-acl-bert.json'))],
+    ]);
+    const r = await resolveReference('https://arxiv.org/abs/1706.03762', opts(f));
+    assert.equal(r.source, 'semanticscholar');
+    assert.equal(r.reference.type, 'preprint');
+    assert.equal(r.reference.archive, 'arXiv');
+    assert.equal(r.reference.archiveId, '1706.03762');
+    assert.equal(r.reference.doi, '10.48550/arXiv.1706.03762');
+    assert.equal(r.reference.containerTitle, undefined);
+    assert.equal(r.reference.url, 'https://arxiv.org/abs/1706.03762');
+    assert.equal(r.warnings.length, 2);
+    assert.match(r.warnings[0], /DataCite returned 404/);
+    assert.match(r.warnings[1], /A published version exists \(DOI 10\.18653\/v1\/N19-1423\)/);
+    assert.deepEqual(names(r), ['datacite:failed', 'semanticscholar:ok']);
+    assert.deepEqual(f.hosts(), ['api.datacite.org', 'api.semanticscholar.org'], 'no Crossref re-resolve, no arXiv API');
+  });
+
+  test('arXiv: S2 arXiv-only record -> preprint without a published-version warning', async () => {
+    const f = fakeFetch([
+      ['https://api.datacite.org/', status(404)],
       ['https://api.semanticscholar.org/graph/v1/paper/ARXIV:2401.00001?fields=', ok(json('s2-preprint-only.json'))],
     ]);
     const r = await resolveReference('2401.00001', opts(f));
     assert.equal(r.source, 'semanticscholar');
     assert.equal(r.reference.type, 'preprint');
     assert.equal(r.warnings.length, 1);
-    assert.match(r.warnings[0], /arXiv has no paper with id 2401\.00001/);
-    assert.deepEqual(f.hosts(), ['export.arxiv.org', 'api.semanticscholar.org']);
+    assert.match(r.warnings[0], /DataCite returned 404/);
   });
 
-  test('arXiv requests are serialised (one at a time)', async () => {
+  test('arXiv: DataCite and S2 fail -> arXiv Atom API last; journal_ref/DOI produce a "published version" warning', async () => {
+    const f = fakeFetch([
+      ['https://api.datacite.org/', status(404)],
+      [/semanticscholar/, status(404)],
+      ['https://export.arxiv.org/api/query?id_list=hep-th%2F9711200', text(fixture('arxiv-hep-th-9711200.atom'))],
+    ]);
+    const r = await resolveReference('https://arxiv.org/abs/hep-th/9711200v3', opts(f));
+    assert.equal(r.source, 'arxiv');
+    assert.equal(r.reference.type, 'preprint');
+    assert.equal(r.reference.doi, '10.1023/A:1026654312961');
+    assert.equal(r.warnings.length, 3);
+    assert.match(r.warnings[2], /A published version exists \(DOI 10\.1023\/A:1026654312961\)/);
+    assert.match(f.calls[2].init.headers.Accept, /atom/);
+    assert.deepEqual(names(r), ['datacite:failed', 'semanticscholar:failed', 'arxiv:failed'].slice(0, 2).concat('arxiv:ok'));
+  });
+
+  test('arXiv unknown everywhere (real "no entry" feed) -> ResolveError with preprint partial', async () => {
+    const f = fakeFetch([
+      ['https://api.datacite.org/', status(404)],
+      [/semanticscholar/, status(404)],
+      ['https://export.arxiv.org/', text(fixture('arxiv-unknown.atom'))],
+    ]);
+    await assert.rejects(resolveReference('9999.99999', opts(f)), (e) => {
+      assert.ok(e instanceof ResolveError);
+      assert.match(e.message, /Could not find arXiv:9999\.99999 \(DataCite: not found; Semantic Scholar: not found; arXiv API: /);
+      assert.equal(e.partial.reference.type, 'preprint');
+      assert.equal(e.partial.reference.archiveId, '9999.99999');
+      assert.equal(e.partial.sources.length, 3);
+      return true;
+    });
+  });
+
+  test('arXiv API requests are serialised (one at a time)', async () => {
     let inFlight = 0; let maxInFlight = 0;
     const f = async (url) => {
+      if (!/export\.arxiv\.org/.test(url)) return new Response('{}', { status: 404 });
       inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
       await new Promise((r) => setTimeout(r, 5));
       inFlight--;
       return new Response(fixture('arxiv-1706.03762.atom'), { status: 200 });
     };
-    await Promise.all(['1706.03762', '1706.03762v2', 'arXiv:1706.03762'].map((id) => resolveReference(id, opts(f))));
+    const results = await Promise.all(['1706.03762', '1706.03762v2', 'arXiv:1706.03762'].map((id) => resolveReference(id, opts(f))));
     assert.equal(maxInFlight, 1);
+    assert.ok(results.every((r) => r.source === 'arxiv'));
   });
 
   test('OpenReview API2 happy path exposes bibtex', async () => {
@@ -742,9 +971,10 @@ describe('resolveReference', () => {
     assert.equal(r.reference.bibtex, undefined);
     assert.match(r.bibtex, /karras2018progressive/);
     assert.deepEqual(r.warnings, []);
+    assert.deepEqual(r.sources, [{ name: 'openreview-api2', status: 'ok' }]);
   });
 
-  test('OpenReview API2 failure -> API1 -> S2 URL fallback', async () => {
+  test('OpenReview API2 failure -> API1 -> S2 URL fallback with the full forum URL encoded', async () => {
     const f = fakeFetch([
       ['https://api2.openreview.net/', status(500)],
       ['https://api.openreview.net/', ok({ notes: [] })],
@@ -755,9 +985,31 @@ describe('resolveReference', () => {
     assert.equal(r.warnings.length, 2);
     assert.match(r.warnings[0], /OpenReview API2 returned 500/);
     assert.match(r.warnings[1], /OpenReview API1 has no note for rJXMpikCZ/);
+    assert.deepEqual(names(r), ['openreview-api2:failed', 'openreview-api1:failed', 'semanticscholar:ok']);
   });
 
-  test('PubMed -> Crossref re-resolve, falling back to the PubMed mapping when Crossref fails', async () => {
+  test('OpenReview anti-bot challenge (real 403 body) everywhere -> ResolveError mentioning OpenReview with a conference partial', async () => {
+    const f = fakeFetch([
+      [/^https:\/\/api2?\.openreview\.net\//, status(403, json('openreview-challenge-403.json'))],
+      [/semanticscholar/, status(404)],
+    ]);
+    await assert.rejects(resolveReference('https://openreview.net/forum?id=rJXMpikCZ', opts(f)), (e) => {
+      assert.ok(e instanceof ResolveError);
+      assert.match(e.message, /OpenReview blocked the request from your browser \(anti-bot challenge\)/);
+      assert.match(e.message, /arXiv link/);
+      assert.deepEqual(e.partial.reference, { type: 'paper-conference', author: [], title: '', url: 'https://openreview.net/forum?id=rJXMpikCZ', accessed: '2026-11-08' });
+      assert.equal(e.partial.source, 'url-only');
+      assert.deepEqual(e.partial.sources.map((x) => [x.name, x.status, x.detail]), [
+        ['openreview-api2', 'failed', 'blocked by anti-bot challenge'],
+        ['openreview-api1', 'failed', 'blocked by anti-bot challenge'],
+        ['semanticscholar', 'failed', 'not found'],
+      ]);
+      return true;
+    });
+    assert.equal(f.calls.length, 3);
+  });
+
+  test('PubMed -> Crossref re-resolve, falling back to the PubMed mapping when the DOI chain fails', async () => {
     const f = fakeFetch([
       ['https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=31452104&retmode=json', ok(json('pubmed-esummary.json'))],
       ['https://api.crossref.org/works/10.1038%2Fs41467-019-11786-6', ok(json('crossref-s41467.json'))],
@@ -768,16 +1020,19 @@ describe('resolveReference', () => {
     assert.equal(r.reference.articleNumber, '3859');
     assert.deepEqual(r.reference.author[1], n('Smith', 'Mary W.'));
     assert.deepEqual(f.hosts(), ['eutils.ncbi.nlm.nih.gov', 'api.crossref.org']);
+    assert.deepEqual(names(r), ['pubmed:ok', 'crossref:ok']);
 
     const f2 = fakeFetch([
       ['https://eutils.ncbi.nlm.nih.gov/', ok(json('pubmed-esummary.json'))],
       ['https://api.crossref.org/', corsFailure],
       ['https://api.datacite.org/', status(404)],
+      ['https://doi.org/', status(404)],
     ]);
     const r2 = await resolveReference('https://pubmed.ncbi.nlm.nih.gov/31452104/', opts(f2));
     assert.equal(r2.source, 'pubmed');
     assert.deepEqual(r2.reference.author[1], n('Smith', 'M W'));
-    assert.equal(r2.warnings.length, 2);
+    assert.equal(r2.warnings.length, 3);
+    assert.deepEqual(names(r2), ['pubmed:ok', 'crossref:failed', 'datacite:failed', 'doi.org:failed']);
   });
 
   test('PMCID -> esummary db=pmc -> Crossref', async () => {
@@ -789,6 +1044,7 @@ describe('resolveReference', () => {
     const r = await resolveReference('PMC6763765', opts(f));
     assert.equal(r.source, 'crossref');
     assert.equal(r.identifier.kind, 'pmcid');
+    assert.deepEqual(names(r), ['pmc:ok', 'crossref:ok']);
   });
 
   test('ISBN via Open Library', async () => {
@@ -797,52 +1053,81 @@ describe('resolveReference', () => {
     assert.equal(r.source, 'openlibrary');
     assert.equal(r.reference.type, 'book');
     assert.equal(r.reference.publisher, 'The MIT Press');
+    assert.deepEqual(r.sources, [{ name: 'openlibrary', status: 'ok' }]);
     const f2 = fakeFetch([['https://openlibrary.org/', ok({})]]);
-    await assert.rejects(resolveReference('9780262035613', opts(f2)), /Open Library has no record for ISBN 9780262035613/);
+    await assert.rejects(resolveReference('9780262035613', opts(f2)), (e) => e instanceof ResolveError && /Open Library has no record for ISBN 9780262035613/.test(e.message) && e.partial.sources[0].detail === 'no record');
   });
 
-  test('ACL id via Semantic Scholar, DOI re-resolved through Crossref', async () => {
+  test('ACL id: Crossref 10.18653/v1/<id> first; S2 ACL: lookup only when Crossref fails', async () => {
     const f = fakeFetch([
-      ['https://api.semanticscholar.org/graph/v1/paper/ACL:N19-1423?fields=title,authors,year,venue,journal,externalIds,publicationVenue,publicationTypes', ok(json('s2-acl-bert.json'))],
       ['https://api.crossref.org/works/10.18653%2Fv1%2FN19-1423', ok({ message: { type: 'proceedings-article', title: ['BERT'], DOI: '10.18653/v1/N19-1423', 'container-title': ['Proceedings of NAACL-HLT 2019'], issued: { 'date-parts': [[2019, 6]] }, author: [{ given: 'Jacob', family: 'Devlin' }] } })],
     ]);
     const r = await resolveReference('https://aclanthology.org/N19-1423/', opts(f));
     assert.equal(r.source, 'crossref');
     assert.equal(r.reference.containerTitle, 'Proceedings of NAACL-HLT 2019');
-    assert.deepEqual(f.hosts(), ['api.semanticscholar.org', 'api.crossref.org']);
+    assert.deepEqual(f.hosts(), ['api.crossref.org']);
+
+    const f2 = fakeFetch([
+      ['https://api.crossref.org/', status(404)],
+      ['https://api.semanticscholar.org/graph/v1/paper/ACL:P15-1001?fields=title,authors,year,venue,journal,externalIds,publicationVenue,publicationTypes', ok(json('s2-acl-bert.json'))],
+    ]);
+    const r2 = await resolveReference('P15-1001', opts(f2));
+    assert.equal(r2.source, 'semanticscholar');
+    assert.deepEqual(f2.hosts(), ['api.crossref.org', 'api.semanticscholar.org'], 'the S2 DOI is not re-resolved (Crossref just failed)');
+    assert.deepEqual(names(r2), ['crossref:failed', 'semanticscholar:ok']);
+
+    const f3 = fakeFetch([['https://api.crossref.org/', status(404)], [/semanticscholar/, status(404)]]);
+    await assert.rejects(resolveReference('P15-1001', opts(f3)), /Could not find ACL Anthology paper P15-1001 \(Crossref: not found; Semantic Scholar: not found\)/);
   });
 
-  test('S2 paper id and CorpusID lookups; Crossref failure falls back to the S2 mapping', async () => {
+  test('S2 paper id and CorpusID lookups; DOI chain failure falls back to the S2 mapping', async () => {
     const f = fakeFetch([
       ['https://api.semanticscholar.org/graph/v1/paper/a4cec122a08216fe8a3bc19b22e78fbaea096256?fields=', ok(json('s2-journal.json'))],
       ['https://api.crossref.org/', status(500)],
       ['https://api.datacite.org/', status(500)],
+      ['https://doi.org/', status(500)],
     ]);
     const r = await resolveReference('https://www.semanticscholar.org/paper/Deep-Learning-LeCun/a4cec122a08216fe8a3bc19b22e78fbaea096256', opts(f));
     assert.equal(r.source, 'semanticscholar');
     assert.equal(r.reference.type, 'article-journal');
-    assert.equal(r.warnings.length, 2);
+    assert.equal(r.warnings.length, 3);
+    assert.deepEqual(names(r), ['semanticscholar:ok', 'crossref:failed', 'datacite:failed', 'doi.org:failed']);
     const f2 = fakeFetch([['https://api.semanticscholar.org/graph/v1/paper/CorpusID:13756489?fields=', ok(json('s2-arxiv-attention.json'))]]);
     const r2 = await resolveReference('https://api.semanticscholar.org/CorpusID:13756489', opts(f2));
     assert.equal(r2.source, 'semanticscholar');
     assert.equal(r2.reference.containerTitle, 'Neural Information Processing Systems');
   });
 
-  test('S2 429 -> waits 1.5 s and retries once', async () => {
+  test('S2 429 (real body) -> waits 2 s and retries once; a TypeError counts as rate limiting too', async () => {
     let n429 = 0;
-    const f = fakeFetch([[/semanticscholar/, () => (n429++ === 0 ? { status: 429 } : { body: json('s2-preprint-only.json') })]]);
+    const f = fakeFetch([[/semanticscholar/, () => (n429++ === 0 ? { status: 429, body: json('s2-429.json') } : { body: json('s2-preprint-only.json') })]]);
     const sleeps = [];
     const r = await resolveReference('https://api.semanticscholar.org/CorpusID:999999', { fetch: f, now: NOW, sleep: async (ms) => { sleeps.push(ms); } });
     assert.equal(r.source, 'semanticscholar');
-    assert.deepEqual(sleeps, [1500]);
+    assert.deepEqual(sleeps, [2000]);
     assert.equal(f.calls.length, 2);
+    assert.ok(f.calls.every((c) => c.init.headers.Accept === 'application/json'), 'Accept header always sent');
 
-    const always429 = fakeFetch([[/semanticscholar/, status(429)]]);
-    await assert.rejects(resolveReference('CorpusID:1', opts(always429)), /Semantic Scholar returned 429 for CorpusID:1 \(rate limited/);
+    const always429 = fakeFetch([[/semanticscholar/, status(429, json('s2-429.json'))]]);
+    await assert.rejects(resolveReference('CorpusID:1', opts(always429)), (e) => {
+      assert.match(e.message, /Semantic Scholar is rate-limited right now \(HTTP 429 for CorpusID:1\)/);
+      assert.deepEqual(e.partial.sources, [{ name: 'semanticscholar', status: 'failed', detail: 'rate limited', message: e.message }]);
+      return true;
+    });
     assert.equal(always429.calls.length, 2);
+
+    let nFail = 0;
+    const typeErrorThenOk = fakeFetch([[/semanticscholar/, () => (nFail++ === 0 ? { reject: new TypeError('Failed to fetch') } : { body: json('s2-preprint-only.json') })]]);
+    const r3 = await resolveReference('CorpusID:2', opts(typeErrorThenOk));
+    assert.equal(r3.source, 'semanticscholar');
+    assert.equal(typeErrorThenOk.calls.length, 2);
+
+    const alwaysTypeError = fakeFetch([[/semanticscholar/, corsFailure]]);
+    await assert.rejects(resolveReference('CorpusID:3', opts(alwaysTypeError)), (e) => /rate-limited right now \(request blocked for CorpusID:3\)/.test(e.message) && e.partial.sources[0].detail === 'rate limited');
+    assert.equal(alwaysTypeError.calls.length, 2);
   });
 
-  test('URL on a known host -> S2 URL lookup first', async () => {
+  test('URL on a host Semantic Scholar knows -> S2 URL lookup first, DOI re-resolved', async () => {
     const f = fakeFetch([
       [/^https:\/\/api\.semanticscholar\.org\/graph\/v1\/paper\/URL:https%3A%2F%2Fdl\.acm\.org%2Fconference%2Ffaccct\?fields=/, ok(json('s2-journal.json'))],
       ['https://api.crossref.org/works/10.1038%2Fnature14539', ok(json('crossref-journal-article.json'))],
@@ -850,39 +1135,130 @@ describe('resolveReference', () => {
     const r = await resolveReference('https://dl.acm.org/conference/faccct', opts(f));
     assert.equal(r.source, 'crossref');
     assert.equal(r.identifier.kind, 'url');
+    assert.deepEqual(names(r), ['semanticscholar:ok', 'crossref:ok']);
   });
 
-  test('URL with CORS-like failure -> ResolveError with url-only partial', async () => {
-    const f = fakeFetch([['https://www.sciencedirect.com/', corsFailure]]);
+  test('URL (a): the page-fetching function returns the head -> html-meta with the final URL', async () => {
+    const head = '<head><title>Workers AI: serverless GPU-powered inference</title><meta property="og:title" content="Workers AI: serverless GPU-powered inference on Cloudflare’s global network"><meta property="og:site_name" content="The Cloudflare Blog"><meta property="article:published_time" content="2023-09-27T13:00:00.000Z"><meta name="author" content="Phil Wittig"><link rel="canonical" href="https://blog.cloudflare.com/workers-ai/"></head>';
+    const f = fakeFetch([
+      [`${META}?url=https%3A%2F%2Fblog.cloudflare.com%2Fworkers-ai`, ok({ ok: true, url: 'https://blog.cloudflare.com/workers-ai/', status: 200, contentType: 'text/html', head })],
+    ]);
+    const r = await resolveReference('https://blog.cloudflare.com/workers-ai', opts(f, { metaEndpoint: META }));
+    assert.equal(r.source, 'html-meta');
+    assert.equal(r.reference.type, 'webpage');
+    assert.equal(r.reference.title, 'Workers AI: serverless GPU-powered inference on Cloudflare’s global network');
+    assert.equal(r.reference.containerTitle, 'The Cloudflare Blog');
+    assert.deepEqual(r.reference.author, [n('Wittig', 'Phil')]);
+    assert.deepEqual([r.reference.year, r.reference.month, r.reference.day], [2023, 9, 27]);
+    assert.equal(r.reference.url, 'https://blog.cloudflare.com/workers-ai/');
+    assert.equal(r.reference.accessed, '2026-11-08');
+    assert.deepEqual(r.warnings, []);
+    assert.deepEqual(r.sources, [{ name: 'api-meta', status: 'ok' }]);
+    assert.equal(f.calls.length, 1, 'no direct fetch, no Wayback');
+    assert.equal(f.calls[0].init.headers.Accept, 'application/json');
+  });
+
+  test('URL (a) -> (b): function 404 (static hosting) then direct fetch of a CORS-enabled page', async () => {
+    const f = fakeFetch([
+      [META, () => ({ status: 404, text: 'Not found' })],
+      ['https://proceedings.mlr.press/v139/radford21a.html', text(fixture('html-pmlr-real-head.html'))],
+    ]);
+    const r = await resolveReference('https://proceedings.mlr.press/v139/radford21a.html', opts(f, { metaEndpoint: META }));
+    assert.equal(r.source, 'html-meta');
+    assert.equal(r.reference.type, 'paper-conference');
+    assert.equal(r.reference.author.length, 12);
+    assert.equal(r.reference.volume, '139');
+    assert.deepEqual(r.sources, [
+      { name: 'api-meta', status: 'failed', detail: 'not available here', message: 'The page-fetching function (/api/meta) is not available on this host' },
+      { name: 'direct', status: 'ok' },
+    ]);
+    assert.match(f.calls[1].init.headers.Accept, /text\/html/);
+  });
+
+  test('URL: without a metaEndpoint (Node default) the function step is skipped', async () => {
+    const f = fakeFetch([['https://proceedings.mlr.press/v139/radford21a.html', text(fixture('html-citation-pmlr.html'))]]);
+    const r = await resolveReference('https://proceedings.mlr.press/v139/radford21a.html', opts(f));
+    assert.equal(r.source, 'html-meta');
+    assert.equal(r.reference.containerTitle, 'Proceedings of the 38th International Conference on Machine Learning');
+    assert.deepEqual(r.warnings, []);
+    assert.deepEqual(r.sources, [{ name: 'api-meta', status: 'skipped', detail: 'no page-fetching function configured' }, { name: 'direct', status: 'ok' }]);
+    const r2 = await resolveReference('https://proceedings.mlr.press/v139/radford21a.html', opts(f, { metaEndpoint: null }));
+    assert.equal(r2.sources[0].status, 'skipped');
+  });
+
+  test('URL (a) function error JSON -> (b) CORS failure -> (c) Wayback snapshot via the id_ raw URL, original URL kept', async () => {
+    const f = fakeFetch([
+      [META, status(502, { ok: false, error: 'The page could not be reached.' })],
+      ['https://openai.com/', corsFailure],
+      ['https://archive.org/wayback/available?url=https%3A%2F%2Fopenai.com%2Findex%2Fgpt-4-research%2F', ok(json('wayback-available.json'))],
+      ['https://web.archive.org/web/20261104165307id_/https://openai.com/index/gpt-4-research/', text('<html><head><title>GPT-4 | OpenAI</title><meta property="og:title" content="GPT-4"><meta property="og:site_name" content="OpenAI"><meta property="og:url" content="https://web.archive.org/web/20261104165307/https://openai.com/index/gpt-4-research/"><meta property="article:published_time" content="2023-03-14"></head><body></body></html>')],
+    ]);
+    const r = await resolveReference('https://openai.com/index/gpt-4-research/', opts(f, { metaEndpoint: META }));
+    assert.equal(r.source, 'wayback');
+    assert.equal(r.reference.type, 'webpage');
+    assert.equal(r.reference.title, 'GPT-4');
+    assert.equal(r.reference.containerTitle, 'OpenAI');
+    assert.equal(r.reference.url, 'https://openai.com/index/gpt-4-research/', 'archive URL in og:url is replaced by the original');
+    assert.deepEqual([r.reference.year, r.reference.month, r.reference.day], [2023, 3, 14]);
+    assert.equal(r.warnings.length, 3);
+    assert.match(r.warnings[0], /Could not fetch openai\.com: The page could not be reached\./);
+    assert.match(r.warnings[1], /Could not reach openai\.com/);
+    assert.match(r.warnings[2], /^Metadata read from an Internet Archive snapshot dated 2026-11-04/);
+    assert.deepEqual(r.sources.map((x) => [x.name, x.status, x.detail]), [
+      ['api-meta', 'failed', 'page unreachable'],
+      ['direct', 'failed', 'unreachable (blocked by CORS or offline)'],
+      ['wayback', 'ok', undefined],
+    ]);
+    assert.deepEqual(f.hosts(), ['papertools.pages.dev', 'openai.com', 'archive.org', 'web.archive.org']);
+  });
+
+  test('URL (c): Wayback snapshot carrying citation_doi re-resolves through Crossref', async () => {
+    const f = fakeFetch([
+      ['https://www.nature.com/', corsFailure],
+      ['https://archive.org/wayback/available', ok({ archived_snapshots: { closest: { available: true, timestamp: '20240101000000', status: '200', url: 'http://web.archive.org/web/20240101000000/https://www.nature.com/articles/nature14539' } } })],
+      ['https://web.archive.org/web/20240101000000id_/https://www.nature.com/articles/nature14539', text(fixture('html-citation-doi.html'))],
+      ['https://api.crossref.org/works/10.1038%2Fnature14539', ok(json('crossref-journal-article.json'))],
+    ]);
+    const r = await resolveReference('https://www.nature.com/articles/nature14539', opts(f));
+    assert.equal(r.source, 'crossref');
+    assert.equal(r.reference.publisher, 'Springer Science and Business Media LLC');
+    assert.deepEqual(names(r), ['api-meta:skipped', 'direct:failed', 'crossref:ok', 'wayback:ok']);
+  });
+
+  test('URL (d): everything fails -> ResolveError with url-only partial and the full sources list', async () => {
+    const f = fakeFetch([
+      ['https://www.sciencedirect.com/', corsFailure],
+      ['https://archive.org/wayback/available', ok({ url: 'x', archived_snapshots: {} })],
+    ]);
     await assert.rejects(resolveReference('https://www.sciencedirect.com/science/article/pii/S0893608014002135', opts(f)), (e) => {
       assert.ok(e instanceof ResolveError);
       assert.match(e.message, /CORS/);
       assert.match(e.message, /sciencedirect\.com/);
+      assert.match(e.message, /Internet Archive/);
       assert.equal(e.partial.source, 'url-only');
       assert.deepEqual(e.partial.reference, {
         type: 'webpage', author: [], title: '', containerTitle: 'sciencedirect.com',
         url: 'https://www.sciencedirect.com/science/article/pii/S0893608014002135', accessed: '2026-11-08',
       });
       assert.equal(e.partial.identifier.kind, 'url');
-      assert.equal(e.partial.warnings.length, 1);
+      assert.deepEqual(e.partial.sources.map((x) => [x.name, x.status, x.detail]), [
+        ['api-meta', 'skipped', 'no page-fetching function configured'],
+        ['direct', 'failed', 'unreachable (blocked by CORS or offline)'],
+        ['wayback', 'failed', 'no snapshot'],
+      ]);
+      assert.equal(e.partial.warnings.length, 2);
       assert.match(e.partial.warnings[0], /Could not reach sciencedirect\.com/);
+      assert.match(e.partial.warnings[1], /no snapshot/);
       return true;
     });
-    assert.equal(f.calls.length, 1, 'unknown hosts must not be sent to Semantic Scholar');
+    assert.equal(f.calls.length, 2, 'unknown hosts must not be sent to Semantic Scholar');
     assert.match(f.calls[0].init.headers.Accept, /text\/html/);
+
+    const f2 = fakeFetch([['https://www.sciencedirect.com/', corsFailure]]);
+    await assert.rejects(resolveReference('https://www.sciencedirect.com/x', opts(f2, { wayback: false })), (e) => e.partial.sources[2].status === 'skipped' && f2.calls.length === 1);
   });
 
-  test('URL whose HTML has citation_* tags -> html-meta', async () => {
-    const f = fakeFetch([['https://proceedings.mlr.press/v139/radford21a.html', text(fixture('html-citation-pmlr.html'))]]);
-    const r = await resolveReference('https://proceedings.mlr.press/v139/radford21a.html', opts(f));
-    assert.equal(r.source, 'html-meta');
-    assert.equal(r.reference.type, 'paper-conference');
-    assert.equal(r.reference.containerTitle, 'Proceedings of the 38th International Conference on Machine Learning');
-    assert.equal(r.reference.accessed, '2026-11-08');
-    assert.deepEqual(r.warnings, []);
-  });
-
-  test('URL whose HTML has citation_doi -> Crossref re-resolve', async () => {
+  test('URL: page HTML with citation_doi -> Crossref re-resolve; citation_arxiv_id -> arXiv chain', async () => {
     const f = fakeFetch([
       ['https://www.nature.com/articles/nature14539', text(fixture('html-citation-doi.html'))],
       ['https://api.crossref.org/works/10.1038%2Fnature14539', ok(json('crossref-journal-article.json'))],
@@ -891,29 +1267,47 @@ describe('resolveReference', () => {
     assert.equal(r.source, 'crossref');
     assert.equal(r.reference.publisher, 'Springer Science and Business Media LLC');
     assert.deepEqual(f.hosts(), ['www.nature.com', 'api.crossref.org']);
-  });
 
-  test('URL whose HTML has citation_arxiv_id -> arXiv re-resolve', async () => {
-    const f = fakeFetch([
+    const f2 = fakeFetch([
       ['https://example.org/paper', text('<head><meta name="citation_title" content="Attention"><meta name="citation_arxiv_id" content="1706.03762"></head>')],
-      ['https://export.arxiv.org/', text(fixture('arxiv-1706.03762.atom'))],
+      ['https://api.datacite.org/', ok(json('datacite-arxiv.json'))],
     ]);
-    const r = await resolveReference('https://example.org/paper', opts(f));
-    assert.equal(r.source, 'arxiv');
-    assert.equal(r.reference.author.length, 8);
+    const r2 = await resolveReference('https://example.org/paper', opts(f2));
+    assert.equal(r2.source, 'datacite');
+    assert.equal(r2.reference.author.length, 8);
+    assert.deepEqual(names(r2), ['api-meta:skipped', 'datacite:ok', 'direct:ok']);
   });
 
-  test('URL with only OG meta -> webpage; page without metadata warns', async () => {
+  test('URL: page HTML with citation_doi keeps the html-meta result when the DOI chain fails', async () => {
+    const f = fakeFetch([
+      ['https://www.nature.com/articles/nature14539', text(fixture('html-citation-doi.html'))],
+      [/crossref|datacite|doi\.org/, status(503)],
+    ]);
+    const r = await resolveReference('https://www.nature.com/articles/nature14539', opts(f));
+    assert.equal(r.source, 'html-meta');
+    assert.equal(r.reference.doi, '10.1038/nature14539');
+    assert.equal(r.warnings.length, 3);
+  });
+
+  test('URL with only OG meta -> webpage; a page without any title is a failure and the chain continues', async () => {
     const f = fakeFetch([['https://www.dailyexample.com/', text(fixture('html-og-only.html'))]]);
     const r = await resolveReference('https://www.dailyexample.com/news/story', opts(f));
     assert.equal(r.source, 'html-meta');
     assert.equal(r.reference.type, 'webpage');
     assert.equal(r.reference.title, 'Some news story & more');
-    const f2 = fakeFetch([['https://www.example.org/', text('<html><body>nothing</body></html>')]]);
-    const r2 = await resolveReference('https://www.example.org/empty', opts(f2));
-    assert.equal(r2.source, 'html-meta');
-    assert.equal(r2.warnings.length, 1);
-    assert.match(r2.warnings[0], /no usable metadata/);
+    const f2 = fakeFetch([
+      ['https://www.example.org/', text('<html><body>nothing</body></html>')],
+      ['https://archive.org/wayback/available', ok({ archived_snapshots: {} })],
+    ]);
+    await assert.rejects(resolveReference('https://www.example.org/empty', opts(f2)), (e) => {
+      assert.deepEqual(e.partial.sources.map((x) => [x.name, x.status, x.detail]), [
+        ['api-meta', 'skipped', 'no page-fetching function configured'],
+        ['direct', 'failed', 'no usable metadata'],
+        ['wayback', 'failed', 'no snapshot'],
+      ]);
+      assert.match(e.partial.warnings[0], /example\.org has no usable metadata \(no title found\)/);
+      return true;
+    });
   });
 
   test('unrecognised input rejects with ResolveError', async () => {
@@ -923,7 +1317,15 @@ describe('resolveReference', () => {
 
   test('fetch failures never escape as raw errors', async () => {
     const f = fakeFetch([]); // every route throws TypeError
-    await assert.rejects(resolveReference('10.1038/nature14539', opts(f)), (e) => e instanceof ResolveError && e.partial.reference.doi === '10.1038/nature14539');
-    await assert.rejects(resolveReference('arXiv:1706.03762', opts(f)), (e) => e instanceof ResolveError && e.partial.reference.archiveId === '1706.03762' && e.partial.warnings.length === 2);
+    await assert.rejects(resolveReference('10.1038/nature14539', opts(f)), (e) => e instanceof ResolveError && e.partial.reference.doi === '10.1038/nature14539' && e.partial.sources.length === 3);
+    await assert.rejects(resolveReference('arXiv:1706.03762', opts(f)), (e) => e instanceof ResolveError && e.partial.reference.archiveId === '1706.03762' && e.partial.sources.length === 3 && e.partial.warnings.length === 4);
+  });
+
+  test('abort signal stops the chain instead of falling through', async () => {
+    const controller = new AbortController();
+    const f = async (url, init) => new Promise((_, reject) => { init.signal.addEventListener('abort', () => reject(new Error('aborted'))); });
+    const p = resolveReference('10.1038/nature14539', { fetch: f, now: NOW, sleep: noSleep, signal: controller.signal });
+    controller.abort();
+    await assert.rejects(p, (e) => e instanceof ResolveError && /cancelled/.test(e.message) && e.partial.sources.length === 0);
   });
 });

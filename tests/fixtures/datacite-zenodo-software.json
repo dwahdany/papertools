@@ -1,0 +1,595 @@
+{
+  "data": {
+    "id": "10.5281/zenodo.3509134",
+    "type": "dois",
+    "attributes": {
+      "doi": "10.5281/zenodo.3509134",
+      "prefix": "10.5281",
+      "suffix": "zenodo.3509134",
+      "identifiers": [],
+      "alternateIdentifiers": [],
+      "creators": [
+        {
+          "name": "The pandas development team",
+          "nameType": "Personal",
+          "familyName": "The pandas development team",
+          "nameIdentifiers": [],
+          "affiliation": []
+        }
+      ],
+      "titles": [
+        {
+          "title": "pandas-dev/pandas: Pandas"
+        }
+      ],
+      "publisher": "Zenodo",
+      "container": {},
+      "publicationYear": 2026,
+      "contributors": [],
+      "dates": [
+        {
+          "date": "2026-11-04",
+          "dateType": "Issued"
+        }
+      ],
+      "language": null,
+      "types": {
+        "ris": "COMP",
+        "bibtex": "misc",
+        "citeproc": "article",
+        "schemaOrg": "SoftwareSourceCode",
+        "resourceType": "",
+        "resourceTypeGeneral": "Software"
+      },
+      "version": "v3.1.1",
+      "url": "https://zenodo.org/doi/10.5281/zenodo.3509134",
+      "metadataVersion": 76,
+      "schemaVersion": "http://datacite.org/schema/kernel-4",
+      "source": "mds",
+      "isActive": true,
+      "state": "findable",
+      "reason": null,
+      "viewCount": 0,
+      "downloadCount": 0,
+      "referenceCount": 0,
+      "citationCount": 45,
+      "partCount": 0,
+      "partOfCount": 0,
+      "versionCount": 76,
+      "versionOfCount": 1,
+      "created": "2019-10-18T18:51:08.000Z",
+      "registered": "2019-10-18T18:51:08.000Z",
+      "published": "2026",
+      "updated": "2026-11-04T15:46:45.000Z"
+    },
+    "relationships": {
+      "client": {
+        "data": {
+          "id": "cern.zenodo",
+          "type": "clients"
+        }
+      },
+      "provider": {
+        "data": {
+          "id": "cern",
+          "type": "providers"
+        }
+      },
+      "media": {
+        "data": {
+          "id": "10.5281/zenodo.3509134",
+          "type": "media"
+        }
+      },
+      "references": {
+        "data": []
+      },
+      "citations": {
+        "data": [
+          {
+            "id": "10.5880/gfz.2.4.2020.004",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.17794296",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.16915547",
+            "type": "dois"
+          },
+          {
+            "id": "10.4230/lipics.cosit.2024.6",
+            "type": "dois"
+          },
+          {
+            "id": "10.1145/3411763.3451683",
+            "type": "dois"
+          },
+          {
+            "id": "10.1101/2022.05.02.22274579",
+            "type": "dois"
+          },
+          {
+            "id": "10.1007/s00521-022-07224-2",
+            "type": "dois"
+          },
+          {
+            "id": "10.1101/2021.04.12.439407",
+            "type": "dois"
+          },
+          {
+            "id": "10.1145/3491102.3502025",
+            "type": "dois"
+          },
+          {
+            "id": "10.1038/s41598-022-10464-w",
+            "type": "dois"
+          },
+          {
+            "id": "10.1093/mnras/stac819",
+            "type": "dois"
+          },
+          {
+            "id": "10.1016/j.dib.2022.108161",
+            "type": "dois"
+          },
+          {
+            "id": "10.1063/5.0058928",
+            "type": "dois"
+          },
+          {
+            "id": "10.1093/mnras/stac787",
+            "type": "dois"
+          },
+          {
+            "id": "10.3390/life12040541",
+            "type": "dois"
+          },
+          {
+            "id": "10.1007/978-3-031-04216-4_3",
+            "type": "dois"
+          },
+          {
+            "id": "10.1186/s12859-022-04620-2",
+            "type": "dois"
+          },
+          {
+            "id": "10.1111/jiec.13254",
+            "type": "dois"
+          },
+          {
+            "id": "10.1021/acs.jcim.0c00899",
+            "type": "dois"
+          },
+          {
+            "id": "10.1073/pnas.2116267119",
+            "type": "dois"
+          },
+          {
+            "id": "10.1038/s41467-022-28770-2",
+            "type": "dois"
+          },
+          {
+            "id": "10.1007/978-3-030-96498-6_19",
+            "type": "dois"
+          },
+          {
+            "id": "10.1051/0004-6361/202039526",
+            "type": "dois"
+          },
+          {
+            "id": "10.1371/journal.pcbi.1009223",
+            "type": "dois"
+          },
+          {
+            "id": "10.1186/s12884-022-04412-9",
+            "type": "dois"
+          },
+          {
+            "id": "10.1101/2021.10.22.465513",
+            "type": "dois"
+          },
+          {
+            "id": "10.1016/j.acthis.2022.151869",
+            "type": "dois"
+          },
+          {
+            "id": "10.1093/mnras/stac261",
+            "type": "dois"
+          },
+          {
+            "id": "10.1128/msphere.01015-21",
+            "type": "dois"
+          },
+          {
+            "id": "10.1145/3388440.3412422",
+            "type": "dois"
+          },
+          {
+            "id": "10.1186/s12864-022-08364-4",
+            "type": "dois"
+          },
+          {
+            "id": "10.7554/elife.63853",
+            "type": "dois"
+          },
+          {
+            "id": "10.1007/s10995-022-03380-y",
+            "type": "dois"
+          },
+          {
+            "id": "10.1136/bmj-2021-068576",
+            "type": "dois"
+          },
+          {
+            "id": "10.5194/gmd-15-1375-2022",
+            "type": "dois"
+          },
+          {
+            "id": "10.21105/joss.03951",
+            "type": "dois"
+          },
+          {
+            "id": "10.1093/mnras/stab2195",
+            "type": "dois"
+          },
+          {
+            "id": "10.1101/2022.02.08.479515",
+            "type": "dois"
+          },
+          {
+            "id": "10.21105/joss.03651",
+            "type": "dois"
+          },
+          {
+            "id": "10.1016/j.jinsphys.2022.104363",
+            "type": "dois"
+          },
+          {
+            "id": "10.21105/joss.03596",
+            "type": "dois"
+          },
+          {
+            "id": "10.3847/1538-3881/abdc2e",
+            "type": "dois"
+          },
+          {
+            "id": "10.1007/s10669-022-09842-6",
+            "type": "dois"
+          },
+          {
+            "id": "10.1111/tbed.14454",
+            "type": "dois"
+          },
+          {
+            "id": "10.3847/1538-4357/abda4c",
+            "type": "dois"
+          }
+        ]
+      },
+      "parts": {
+        "data": []
+      },
+      "partOf": {
+        "data": []
+      },
+      "versions": {
+        "data": [
+          {
+            "id": "10.5281/zenodo.6702671",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.5203279",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.4452601",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.4940217",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.6053272",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.10426137",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.4309786",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.7344967",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.7979740",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.8239932",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.8092754",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.5060318",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.5501881",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.5893288",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.10107975",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.23565656",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.3898987",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.3708035",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.23955360",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.5013202",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.7794821",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.10697587",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.4394318",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.17229934",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.3950442",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.8301632",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.10537285",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.17992932",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.21500199",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.3862857",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.18675244",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.4572994",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.4524629",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.3964380",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.3524604",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.10304236",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.4311557",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.10957263",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.7549438",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.4067057",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.16918803",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.5824773",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.7018966",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.3993412",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.19340003",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.3630805",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.7223478",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.13819579",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.3644238",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.18328522",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.4681666",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.8364959",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.4019559",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.5136416",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.21003741",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.5574486",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.7037953",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.20127038",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.3715232",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.7093122",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.4161697",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.6408044",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.7741580",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.7658911",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.10045529",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.15831829",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.17806077",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.18250052",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.22820507",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.5774815",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.15597513",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.23065223",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.7857418",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.3603473",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.3509135",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.3509134",
+            "type": "dois"
+          }
+        ]
+      },
+      "versionOf": {
+        "data": [
+          {
+            "id": "10.5281/zenodo.3509134",
+            "type": "dois"
+          }
+        ]
+      }
+    }
+  }
+}

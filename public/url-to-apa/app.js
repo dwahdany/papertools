@@ -1,5 +1,7 @@
-// URL → APA citation page logic. Everything runs in the browser: the resolver
-// talks to public metadata APIs directly, the formatter renders APA + BibTeX.
+// URL → APA citation page logic. The resolver talks to the public metadata APIs
+// directly from the browser; ordinary web pages go through this site's small
+// stateless /api/meta function (with the Internet Archive as fallback). The
+// formatter renders APA + BibTeX locally.
 import { detectIdentifier, resolveReference, ResolveError, todayIso } from '../assets/resolve.js';
 import { formatApa } from '../assets/apa.js';
 import { referenceToBibtex, parseNames } from '../assets/bibtex.js';
@@ -11,6 +13,7 @@ import { $, toast, copyToClipboard, persist, debounce } from '../assets/ui.js';
 
 const urlInput = $('#url');
 const status = $('#status');
+const sourcesEl = $('#sources');
 const errorEl = $('#error');
 const resultEl = $('#result');
 const apaEl = $('#apa');
@@ -67,9 +70,16 @@ const KIND_LABELS = {
 };
 
 const SOURCE_LABELS = {
-  crossref: 'Crossref', datacite: 'DataCite', arxiv: 'arXiv', semanticscholar: 'Semantic Scholar',
+  crossref: 'Crossref', datacite: 'DataCite', 'doi.org': 'doi.org', arxiv: 'arXiv', semanticscholar: 'Semantic Scholar',
   openreview: 'OpenReview', pubmed: 'PubMed', openlibrary: 'Open Library',
-  'html-meta': 'the page’s own metadata', 'url-only': 'the URL alone',
+  'html-meta': 'the page’s own metadata', wayback: 'an Internet Archive snapshot of the page', 'url-only': 'the URL alone',
+};
+
+/** Labels for the resolver's `sources` entries (every API / step it tried). */
+const ATTEMPT_LABELS = {
+  crossref: 'Crossref', datacite: 'DataCite', 'doi.org': 'doi.org', arxiv: 'arXiv API', semanticscholar: 'Semantic Scholar',
+  'openreview-api2': 'OpenReview', 'openreview-api1': 'OpenReview (API 1)', pubmed: 'PubMed', pmc: 'PubMed Central',
+  openlibrary: 'Open Library', 'api-meta': 'this site’s page fetcher', direct: 'the page directly', wayback: 'Internet Archive',
 };
 
 /** The reference as returned by the resolver (or the partial one); edits are overlaid on it. */
@@ -247,6 +257,27 @@ function showError(message) {
   errorEl.hidden = !message;
 }
 
+/**
+ * Render the "Sources tried" line: "Crossref ✓ · Semantic Scholar ✗ (rate limited)".
+ * @param {Array<{name: string, status: string, detail?: string}>} [sources]
+ */
+function renderSources(sources) {
+  sourcesEl.textContent = '';
+  const list = Array.isArray(sources) ? sources : [];
+  sourcesEl.hidden = list.length === 0;
+  if (!list.length) return;
+  sourcesEl.appendChild(document.createTextNode('Sources tried: '));
+  list.forEach((s, i) => {
+    if (i) sourcesEl.appendChild(document.createTextNode(' · '));
+    const item = document.createElement('span');
+    item.className = `source source-${s.status}`;
+    const mark = s.status === 'ok' ? '✓' : (s.status === 'failed' ? '✗' : '–');
+    const detail = s.status === 'ok' ? '' : ` (${s.status === 'skipped' ? `skipped: ${s.detail || 'not needed'}` : (s.detail || 'failed')})`;
+    item.textContent = `${ATTEMPT_LABELS[s.name] || s.name} ${mark}${detail}`;
+    sourcesEl.appendChild(item);
+  });
+}
+
 /** Update the status line; `busy` adds a spinner. */
 function setStatus(text, busy = false) {
   status.textContent = '';
@@ -270,6 +301,12 @@ function describeIdentifier(identifier) {
 // ---------------------------------------------------------------------------
 // Lookup
 // ---------------------------------------------------------------------------
+
+/** Resolver warnings minus the per-source failure messages (those are shown in the sources line). */
+function userWarnings(warnings, sources) {
+  const failures = new Set((sources || []).map((s) => s.message).filter(Boolean));
+  return (warnings || []).filter((w) => !failures.has(w) && !/^Could not reach /.test(w));
+}
 
 /** Put the current query into the address bar so results are bookmarkable. */
 function rememberQuery(query) {
@@ -297,28 +334,32 @@ async function lookup(rawInput) {
   inflight = controller;
   rememberQuery(query);
   showError('');
+  renderSources([]);
   const identifier = detectIdentifier(query);
   setStatus(`Looking up … ${describeIdentifier(identifier) || 'checking the input'}`, true);
 
   try {
     const result = await resolveReference(query, { signal: controller.signal });
     if (controller.signal.aborted) return;
-    showReference(result.reference, result.warnings);
+    // Failed attempts are listed in the sources line; keep only the other notes as warnings.
+    showReference(result.reference, userWarnings(result.warnings, result.sources));
     setStatus(`${describeIdentifier(result.identifier)} · via ${SOURCE_LABELS[result.source] || result.source}`);
+    renderSources(result.sources);
   } catch (err) {
     if (controller.signal.aborted) return;
     const message = err && err.message ? err.message : String(err);
     showError(message);
     if (err instanceof ResolveError && err.partial) {
       const { partial } = err;
-      // The error paragraph already explains why the lookup failed; drop the
-      // resolver's duplicate of it and its raw "Could not reach …" line.
-      const extraWarnings = partial.warnings.filter((w) => w !== message && !/^Could not reach /.test(w));
+      // The error paragraph already explains why the lookup failed and the
+      // sources line lists every failed attempt; drop their duplicates.
+      const extraWarnings = userWarnings(partial.warnings, partial.sources).filter((w) => w !== message);
       showReference(partial.reference, extraWarnings, {
         partial: partial.source === 'url-only' && partial.identifier && partial.identifier.kind === 'url',
         openEditor: true,
       });
       setStatus(`${describeIdentifier(partial.identifier)} · could not be looked up; fill in the fields below`);
+      renderSources(partial.sources);
     } else {
       showReference(makeReference({ type: 'webpage', title: '', accessed: todayIso() }), [], { openEditor: true });
       setStatus('Could not recognise the input; fill in the fields below to build a reference by hand.');

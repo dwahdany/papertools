@@ -1,4 +1,5 @@
-// URL / identifier -> Reference resolvers. Browser-only, CORS-friendly APIs.
+// URL / identifier -> Reference resolvers. Browser-first, CORS-friendly APIs,
+// with one same-origin helper (the /api/meta Pages Function) for ordinary web pages.
 //
 // CONTRACT:
 //
@@ -14,44 +15,77 @@
 //     Extra: arXiv identifiers carry `version` ("5" for "1706.03762v5", else undefined);
 //     `id` is always the version-less id.
 //
-//   resolveReference(input, { fetch?, signal?, now?, sleep? }) -> Promise<{
+//   resolveReference(input, { fetch?, signal?, now?, sleep?, metaEndpoint?, wayback? }) -> Promise<{
 //     reference: Reference,
-//     source: string,          // 'crossref' | 'datacite' | 'arxiv' | 'semanticscholar' | 'openreview' | 'pubmed' | 'openlibrary' | 'html-meta' | 'url-only'
+//     source: string,          // 'crossref' | 'datacite' | 'doi.org' | 'arxiv' | 'semanticscholar' |
+//                              // 'openreview' | 'pubmed' | 'openlibrary' | 'html-meta' | 'wayback' | 'url-only'
 //     identifier: ReturnType<typeof detectIdentifier>,
-//     warnings: string[],
+//     warnings: string[],      // human-readable notes, including every failed attempt
+//     sources: Source[],       // every source attempted, in order (see below)
 //     bibtex?: string,         // OpenReview only: the note's content._bibtex when present
 //   }>
-//     Strategy (first success wins, failures recorded in warnings):
-//       doi    -> api.crossref.org/works/{doi}  -> api.datacite.org/dois/{doi}
-//       arxiv  -> export.arxiv.org/api/query?id_list=ID (Atom XML; parsed with the built-in
-//                 tag scanner, no DOMParser needed) -> semanticscholar
-//                 Prefer published version? NO: cite the arXiv preprint (type 'preprint',
-//                 archive 'arXiv', archiveId without version) but if the Atom has a DOI
-//                 record it in `doi`; add a warning "A published version exists (DOI …)" if
-//                 arXiv's journal_ref/doi present.
-//       pmid   -> eutils esummary (retmode=json) -> if it has a DOI, crossref for richer data
+//     Source = { name, status: 'ok' | 'skipped' | 'failed', detail?: string, message?: string }
+//       name:   'crossref' | 'datacite' | 'doi.org' | 'arxiv' | 'semanticscholar' | 'openreview-api2' |
+//               'openreview-api1' | 'pubmed' | 'pmc' | 'openlibrary' | 'api-meta' | 'direct' | 'wayback'
+//       detail: short reason for 'failed' / 'skipped' ("not found", "rate limited", "blocked by CORS",
+//               "no usable metadata", …); message: the full warning text for failures.
+//     Options:
+//       fetch        inject a fetch implementation (tests); default globalThis.fetch
+//       signal       AbortSignal cancelling every request
+//       now          Date used for `accessed`
+//       sleep        (ms) => Promise, used for the Semantic Scholar back-off (default setTimeout)
+//       metaEndpoint URL of the page-fetching function (GET ?url=…, see functions/api/meta.js).
+//                    Default: new URL('/api/meta', location.origin) in browsers; undefined in Node
+//                    (and when passed explicitly as null/undefined) -> the step is skipped.
+//       wayback      try the Internet Archive for web pages (default true)
+//
+//     Strategy (first success wins; every attempt is recorded in `sources` and failures in `warnings`;
+//     the chains below follow what the live APIs actually allow from a browser):
+//       doi    -> api.crossref.org/works/{doi} -> api.datacite.org/dois/{doi}
+//                 -> doi.org/{doi} with Accept: application/vnd.citationstyles.csl+json (fromCsl).
+//                 arXiv DOIs (10.48550/arXiv.ID) skip Crossref (they are DataCite DOIs) and use the
+//                 arXiv chain.
+//       arxiv  -> api.datacite.org/dois/10.48550/arXiv.ID (fromDataciteArxiv; DataCite has every arXiv
+//                 paper and sends CORS) -> semanticscholar ARXIV:ID -> export.arxiv.org Atom (last: the
+//                 arXiv API sends no CORS header, so this only works outside browsers).
+//                 The arXiv preprint is cited (type 'preprint', archive 'arXiv', archiveId without
+//                 version, doi 10.48550/arXiv.ID, url arxiv.org/abs/ID). When Semantic Scholar was
+//                 consulted and knows a non-arXiv DOI, or the Atom feed carries a DOI/journal_ref, a
+//                 warning "A published version exists (DOI …)" is added. No extra request is made
+//                 just for that warning.
+//       pmid   -> eutils esummary (retmode=json) -> if it has a DOI, the DOI chain for richer data
 //       pmcid  -> eutils esummary db=pmc -> pmid / doi re-resolve as above
 //       openreview -> api2.openreview.net/notes?forum=ID then api.openreview.net/notes?forum=ID
-//                 (content fields may be {value: …} in API2) -> type paper-conference with
-//                 venue as containerTitle; fallback semanticscholar URL lookup
-//       acl, s2 -> api.semanticscholar.org/graph/v1/paper/{URL:…|ACL:…|ARXIV:…}
+//                 (content fields may be {value: …} in API2) -> type paper-conference with venue
+//                 as containerTitle. OpenReview answers 403 {"name":"ChallengeRequiredError"} (anti-bot
+//                 challenge) from many networks; on that, or any failure, semanticscholar URL: lookup
+//                 with the full forum URL -> ResolveError whose partial is { type: 'paper-conference',
+//                 url, accessed } and whose message says OpenReview blocked the request.
+//       acl    -> api.crossref.org/works/10.18653/v1/{id} (2017+ IDs) -> semanticscholar ACL:{id}
+//       s2     -> api.semanticscholar.org/graph/v1/paper/{sha|CorpusID:n}
 //                 ?fields=title,authors,year,venue,journal,externalIds,publicationVenue,publicationTypes
+//                 A (non-arXiv) DOI in the record is re-resolved through the DOI chain.
 //       isbn   -> openlibrary.org/api/books?bibkeys=ISBN:…&format=json&jscmd=data
-//       url    -> if the URL contains a DOI/arXiv id: resolve as above. Else try
-//                 semanticscholar URL: lookup for known domains (arxiv, aclweb, acm, biorxiv,
-//                 dblp, pubmed). Else fetch(url) directly and parse <meta> tags
-//                 (citation_*, og:*, dc.*, article:published_time, author, <title>,
-//                 JSON-LD @type Article/ScholarlyArticle/WebPage). Direct fetch usually
-//                 fails with CORS -> reject with a ResolveError whose .partial holds a
-//                 'url-only' Reference { type:'webpage', url, containerTitle: hostname
-//                 (www. stripped), accessed: today } and whose message explains the
-//                 page could not be read from the browser so fields must be filled in.
+//       url    -> if the URL contains a DOI/arXiv id: resolve as above. Else, for a few hosts
+//                 Semantic Scholar knows (acm, biorxiv, dblp, …), its URL: lookup. Then:
+//                 (a) GET {metaEndpoint}?url=… -> { ok, url, head } and fromHtmlMeta(head, url);
+//                 (b) fetch(url) directly (works on CORS-enabled sites such as proceedings.mlr.press);
+//                 (c) archive.org/wayback/available?url=… -> web.archive.org/web/{ts}id_/{url}
+//                     (raw snapshot) -> fromHtmlMeta with the ORIGINAL url, plus a warning naming the
+//                     snapshot date; source 'wayback';
+//                 (d) ResolveError whose .partial holds a 'url-only' Reference { type:'webpage', url,
+//                     containerTitle: hostname (www. stripped), accessed: today }.
+//                 An HTML result without any title counts as a failure and the chain continues. When an
+//                 HTML result carries citation_doi / citation_arxiv_id, the richer chain is tried and
+//                 the HTML result kept as fallback.
 //
-//   class ResolveError extends Error { partial?: {reference, source, identifier, warnings} }
+//   class ResolveError extends Error { partial?: {reference, source, identifier, warnings, sources} }
 //
 //   Mapping helpers (exported for tests):
 //     fromCrossref(item) -> Reference        (item = message of works/{doi})
 //     fromDatacite(attrs) -> Reference       (attrs = data.attributes)
+//     fromDataciteArxiv(attrs, id?) -> Reference  (arXiv record: earliest 'Submitted' date, normalised DOI)
+//     fromCsl(json) -> Reference             (CSL-JSON from doi.org content negotiation)
 //     fromArxivAtom(xmlString, id) -> Reference
 //     fromSemanticScholar(json) -> Reference
 //     fromOpenReview(note) -> Reference
@@ -79,31 +113,35 @@
 //     fall back to published-print / published-online / created. Strip HTML/JATS tags from titles.
 //     Crossref author objects: {given, family, name (literal), sequence}. Use `page`
 //     ("1-10") or `article-number`. Use `publisher`. For journals, `container-title[0]`,
-//     short-container-title ignored. Volume/issue strings.
+//     short-container-title ignored. Volume/issue strings. A 404 is text/plain "Resource not found.".
+//   - DataCite arXiv records: doi comes back lower-case ("10.48550/arxiv.1706.03762") and is
+//     normalised to "10.48550/arXiv.1706.03762"; creators carry givenName/familyName/nameType.
+//   - CSL-JSON (doi.org): type article-journal/paper-conference/book/chapter/thesis/report/
+//     software/dataset/webpage map 1:1; 'article' is a preprint when the publisher is arXiv.
 //   - arXiv id normalisation: accept old-style "hep-th/9901001" and new "1706.03762v5".
 //   - Always set `url` to a canonical landing URL when none better exists.
-//   - The `fetch` option allows injecting a fake fetch in tests; default globalThis.fetch.
-//     The `sleep` option (ms -> Promise) is used for the Semantic Scholar 429 back-off.
-//   - Every network call: timeout ~15s via AbortController, Accept: application/json,
-//     and a friendly error message (status code, host) on failure.
+//   - Every network call: timeout ~15s via AbortController, an Accept header, and a friendly
+//     error message (status code, host) on failure.
 //
-// CORS: Crossref, DataCite, the arXiv export API, Semantic Scholar, OpenReview (API1 and
-// API2), NCBI E-utilities and Open Library all answer with
-// `Access-Control-Allow-Origin: *`, so a browser page can call them directly. Publisher
-// landing pages generally do NOT, which is why the 'url' strategy ends in a ResolveError
-// with a partial reference. (Unsure: OpenReview's API1 may be retired at some point; it is
-// only a fallback here.)
+// CORS (probed live): Crossref, DataCite, doi.org (and the Crossref/DataCite hops it redirects to),
+// Semantic Scholar (200 only), NCBI E-utilities, Open Library, archive.org and proceedings.mlr.press
+// answer with Access-Control-Allow-Origin. export.arxiv.org, arxiv.org, aclanthology.org, github.com and
+// most publisher pages do NOT – which is why the 'url' strategy goes through /api/meta and the Wayback
+// Machine before giving up with a ResolveError. OpenReview's APIs may answer every request with an
+// anti-bot challenge (HTTP 403 ChallengeRequiredError).
 //
 // Etiquette: Crossref is used through its plain (anonymous) pool – a browser must not leak
-// an e-mail address, so no `mailto` parameter. Semantic Scholar is rate-limited to about one
-// unauthenticated request per second (shared): on HTTP 429 we wait 1.5 s and retry once.
-// arXiv asks for one request at a time: all arXiv requests go through a module-level queue.
+// an e-mail address, so no `mailto` parameter. Semantic Scholar's shared unauthenticated pool is
+// rate-limited and its 429 response has no CORS header (browsers see a TypeError): on 429 or a
+// network error we wait 2 s and retry once, then give up with a "rate-limited" warning. It is never
+// tried before Crossref/DataCite when those apply. arXiv asks for one request at a time: all arXiv
+// API requests go through a module-level queue.
 
 import { compactReference, makeReference } from './model.js';
 
 export {
   detectIdentifier, resolveReference, ResolveError,
-  fromCrossref, fromDatacite, fromArxivAtom, fromSemanticScholar, fromOpenReview,
+  fromCrossref, fromDatacite, fromDataciteArxiv, fromCsl, fromArxivAtom, fromSemanticScholar, fromOpenReview,
   fromPubmedSummary, fromOpenLibrary, fromHtmlMeta,
   canonicalUrl, todayIso, fetchJson, fetchText, parseXml, scanHtml, decodeEntities,
   parseFullName, parseDate,
@@ -112,12 +150,13 @@ export {
 /** @typedef {import('./model.js').Reference} Reference */
 /** @typedef {import('./model.js').Name} Name */
 /** @typedef {{ kind: string, id: string, url: string, version?: string }} Identifier */
+/** @typedef {{ name: string, status: 'ok'|'skipped'|'failed', detail?: string, message?: string }} Source */
 
 /** Error thrown by resolveReference; `partial` carries a best-effort result. */
 class ResolveError extends Error {
   /**
    * @param {string} message
-   * @param {{reference: Reference, source: string, identifier: Identifier|null, warnings: string[]}} [partial]
+   * @param {{reference: Reference, source: string, identifier: Identifier|null, warnings: string[], sources?: Source[]}} [partial]
    */
   constructor(message, partial) {
     super(message);
@@ -658,7 +697,8 @@ const DEFAULT_TIMEOUT_MS = 15000;
  * Fetch a URL with timeout and friendly errors.
  * @param {string} url
  * @param {{signal?: AbortSignal, fetch?: typeof fetch, accept?: string, service?: string,
- *   subject?: string, timeoutMs?: number}} [options]
+ *   subject?: string, timeoutMs?: number, allowErrorStatus?: boolean}} [options]
+ *   `allowErrorStatus` returns non-2xx responses instead of throwing.
  * @returns {Promise<Response>}
  */
 async function fetchResponse(url, options = {}) {
@@ -678,16 +718,23 @@ async function fetchResponse(url, options = {}) {
       signal: controller.signal,
       headers: { Accept: options.accept || 'application/json' },
     });
-    if (!response.ok) {
+    if (!response.ok && !options.allowErrorStatus) {
       const err = new ResolveError(`${service} returned ${response.status}${subject}${statusHint(response.status)}`);
       err.status = response.status;
+      // Keep the start of the body: some services explain themselves there
+      // (OpenReview's anti-bot challenge, Semantic Scholar's rate limit).
+      try { err.body = String(await response.text()).slice(0, 2000); } catch { err.body = ''; }
       throw err;
     }
     return response;
   } catch (err) {
     if (err instanceof ResolveError) throw err;
     if (options.signal && options.signal.aborted) throw new ResolveError(`Request to ${service} was cancelled`);
-    if (controller.signal.aborted) throw new ResolveError(`${service} did not respond within ${Math.round((options.timeoutMs ?? DEFAULT_TIMEOUT_MS) / 1000)} s${subject}`);
+    if (controller.signal.aborted) {
+      const t = new ResolveError(`${service} did not respond within ${Math.round((options.timeoutMs ?? DEFAULT_TIMEOUT_MS) / 1000)} s${subject}`);
+      t.timeout = true;
+      throw t;
+    }
     const reason = err && err.message ? err.message : String(err);
     const netErr = new ResolveError(`Could not reach ${service} (${hostOf(url) || url}): ${reason}`);
     netErr.networkError = true;
@@ -779,8 +826,11 @@ function fromCrossref(item) {
   const containers = (Array.isArray(it['container-title']) ? it['container-title'] : [it['container-title']])
     .map(cleanTitle).filter(Boolean);
   if (containers.length > 1) {
-    const seriesIdx = containers.findIndex((c) => /lecture notes|series|advances in|studies in/i.test(c));
-    const series = seriesIdx === -1 ? containers[1] : containers[seriesIdx];
+    // Crossref lists a book series before the book title (Springer: ["Lecture Notes in
+    // Computer Science", "Computer Vision – ECCV 2016"], ["Methods in Molecular Biology",
+    // "Docking Screens for Drug Discovery"]); a recognisable series name anywhere wins.
+    const seriesIdx = containers.findIndex((c) => /lecture notes|series|advances in|studies in|methods in|handbook of|topics in|frontiers in|progress in/i.test(c));
+    const series = seriesIdx === -1 ? containers[0] : containers[seriesIdx];
     ref.containerTitle = containers.find((c) => c !== series);
     ref.collectionTitle = series;
   } else if (containers.length === 1) {
@@ -854,7 +904,7 @@ function fromDatacite(attrs) {
   const general = collapse(a.types && a.types.resourceTypeGeneral).toLowerCase();
   const specific = collapse(a.types && a.types.resourceType).toLowerCase();
   const publisher = cleanTitle(typeof a.publisher === 'object' && a.publisher ? a.publisher.name : a.publisher);
-  const doi = collapse(a.doi);
+  const doi = normaliseArxivDoi(collapse(a.doi));
   let type = DATACITE_TYPES[specific.replace(/\s+/g, '')] || DATACITE_TYPES[general] || 'generic';
   if (general === 'text' && (/arxiv/i.test(publisher) || /^10\.48550\//.test(doi))) type = 'preprint';
 
@@ -889,6 +939,145 @@ function fromDatacite(attrs) {
     } else {
       ref.archive = publisher;
     }
+  }
+  return compactReference(ref);
+}
+
+/** "10.48550/arxiv.1706.03762" (DataCite / doi.org casing) -> "10.48550/arXiv.1706.03762". */
+function normaliseArxivDoi(doi) {
+  const m = /^10\.48550\/arxiv\.(.+)$/i.exec(doi);
+  return m ? `10.48550/arXiv.${m[1]}` : doi;
+}
+
+/**
+ * Map a DataCite record of an arXiv paper (DOI 10.48550/arXiv.ID) to a preprint
+ * Reference. Reuses fromDatacite and then applies the arXiv conventions: the
+ * date is the earliest 'Submitted' date (v1) and falls back to publicationYear,
+ * the DOI is normalised to "10.48550/arXiv.ID", the URL is the abstract page.
+ * @param {any} attrs  `data.attributes`
+ * @param {string} [id]  arXiv id when known (else derived from the DOI / identifiers)
+ * @returns {Reference}
+ */
+function fromDataciteArxiv(attrs, id) {
+  const a = attrs && typeof attrs === 'object' ? attrs : {};
+  const ref = fromDatacite(a);
+  const fromDoi = /^10\.48550\/arxiv\.(.+)$/i.exec(collapse(a.doi));
+  const fromIds = (Array.isArray(a.identifiers) ? a.identifiers : []).find((x) => x && /arxiv/i.test(x.identifierType || ''));
+  const parsed = arxivId(id) || (fromDoi && arxivId(fromDoi[1])) || (fromIds && arxivId(fromIds.identifier)) || { id: str(id) || (fromDoi ? fromDoi[1] : '') };
+  const arxiv = parsed.id;
+  ref.type = 'preprint';
+  ref.archive = 'arXiv';
+  if (arxiv) {
+    ref.archiveId = arxiv;
+    ref.doi = `10.48550/arXiv.${arxiv}`;
+    ref.url = `https://arxiv.org/abs/${arxiv}`;
+  }
+  const submitted = (Array.isArray(a.dates) ? a.dates : [])
+    .filter((d) => d && /^submitted$/i.test(d.dateType || ''))
+    .map((d) => parseDate(d.date))
+    .filter((d) => d.year)
+    .sort((x, y) => (x.year - y.year) || ((x.month || 0) - (y.month || 0)) || ((x.day || 0) - (y.day || 0)));
+  delete ref.year; delete ref.month; delete ref.day;
+  if (submitted.length) Object.assign(ref, submitted[0]);
+  else if (int(a.publicationYear)) ref.year = int(a.publicationYear);
+  else Object.assign(ref, parseDate((a.dates || []).map((d) => d && d.date).find(Boolean)));
+  delete ref.containerTitle; delete ref.volume; delete ref.issue; delete ref.page;
+  return compactReference(ref);
+}
+
+const CSL_TYPES = {
+  'article-journal': 'article-journal',
+  'article-magazine': 'article-journal',
+  'article-newspaper': 'article-journal',
+  'paper-conference': 'paper-conference',
+  book: 'book',
+  chapter: 'chapter',
+  thesis: 'thesis',
+  report: 'report',
+  software: 'software',
+  dataset: 'dataset',
+  webpage: 'webpage',
+  'post-weblog': 'webpage',
+  post: 'webpage',
+  manuscript: 'manuscript',
+  patent: 'patent',
+  document: 'generic',
+  article: 'generic',
+};
+
+/** CSL-JSON author -> Name ({family, given} | {literal} | family-only org names). */
+function cslName(c) {
+  if (!c || typeof c !== 'object') return null;
+  const literal = collapse(c.literal || c.name);
+  if (literal) return { literal };
+  const family = collapse(c.family);
+  const given = collapse(c.given);
+  if (!family) return null;
+  if (!given) return family.includes(' ') ? { literal: family } : { family };
+  const out = { family, given };
+  if (c['non-dropping-particle'] || c['dropping-particle']) out.particle = collapse([c['dropping-particle'], c['non-dropping-particle']].filter(Boolean).join(' '));
+  if (c.suffix) out.suffix = collapse(c.suffix);
+  return out;
+}
+
+/**
+ * Map a CSL-JSON item (doi.org content negotiation, any registration agency)
+ * to a Reference.
+ * @param {any} json
+ * @returns {Reference}
+ */
+function fromCsl(json) {
+  const it = json && typeof json === 'object' && !Array.isArray(json) ? json : {};
+  const cslType = collapse(it.type).toLowerCase();
+  const publisher = cleanTitle(it.publisher);
+  const doi = normaliseArxivDoi(collapse(it.DOI));
+  // doi.org may hand back Crossref's own type vocabulary ('journal-article') inside CSL-JSON.
+  let type = CSL_TYPES[cslType] || CROSSREF_TYPES[cslType] || 'generic';
+  const isArxiv = /^arxiv$/i.test(publisher) || /^10\.48550\/arxiv\./i.test(doi);
+  if ((cslType === 'article' || cslType === 'document' || !cslType) && isArxiv) type = 'preprint';
+  else if (cslType === 'article' && collapse(first(it['container-title']))) type = 'article-journal';
+
+  const ref = makeReference({ type });
+  let title = cleanTitle(first(it.title));
+  const subtitle = cleanTitle(first(it.subtitle));
+  if (subtitle && title && !title.toLowerCase().includes(subtitle.toLowerCase())) title = `${title}: ${subtitle}`;
+  ref.title = title || subtitle;
+  ref.author = mapNames(it.author, cslName);
+  const editors = mapNames(it.editor, cslName);
+  if (editors.length) ref.editor = editors;
+  Object.assign(ref, crossrefDate(it));
+  const container = cleanTitle(first(it['container-title']));
+  if (container) ref.containerTitle = container;
+  const collection = cleanTitle(first(it['collection-title']));
+  if (collection) ref.collectionTitle = collection;
+  const event = cleanTitle(it['event-title'] || it.event);
+  if (type === 'paper-conference' && !ref.containerTitle && event) ref.containerTitle = event;
+  ref.volume = collapse(it.volume);
+  ref.issue = collapse(it.issue);
+  ref.page = collapse(it.page);
+  ref.articleNumber = collapse(it['article-number']);
+  ref.publisher = publisher;
+  if (it['publisher-place']) ref.publisherPlace = cleanTitle(it['publisher-place']);
+  ref.doi = doi;
+  const rawUrl = collapse(it.URL);
+  // doi.org hands out "http://dx.doi.org/…" links; keep the canonical https://doi.org form.
+  ref.url = /^https?:\/\/(dx\.)?doi\.org\//i.test(rawUrl) && doi ? `https://doi.org/${doi}` : (rawUrl || (doi ? `https://doi.org/${doi}` : ''));
+  const isbn = first(it.ISBN);
+  if (isbn) ref.isbn = collapse(isbn);
+  if (it.number && (type === 'report' || type === 'patent')) ref.number = collapse(it.number);
+  if (it.genre && (type === 'thesis' || type === 'report')) ref.genre = cleanTitle(it.genre);
+  if (it.version && type === 'software') ref.version = collapse(it.version);
+  if (type === 'preprint') {
+    if (isArxiv) {
+      ref.archive = 'arXiv';
+      const m = /^10\.48550\/arXiv\.(.+)$/.exec(doi);
+      if (m) { ref.archiveId = m[1]; ref.url = `https://arxiv.org/abs/${m[1]}`; }
+      delete ref.publisher;
+    } else {
+      ref.archive = cleanTitle(it.archive) || publisher;
+    }
+  } else if (type === 'thesis' || type === 'report') {
+    ref.institution = cleanTitle(it.publisher || it.institution);
   }
   return compactReference(ref);
 }
@@ -1128,6 +1317,11 @@ function fromHtmlMeta(doc, url, now) {
   if (!ref.year) Object.assign(ref, parseDate(get('article:published_time', 'dc.date', 'dcterms.date', 'dcterms.issued', 'date', 'datepublished', 'pubdate', 'parsely-pub-date', 'article:modified_time')));
   if (ref.type === 'webpage' && !ref.containerTitle) ref.containerTitle = cleanTitle(get('og:site_name', 'dc.publisher', 'application-name')) || host;
   ref.url = scan.canonical || get('og:url') || get('citation_public_url', 'citation_abstract_html_url') || pageUrl;
+  // PMLR pages carry the volume only in their path (/v139/...).
+  if (!ref.volume && ref.type === 'paper-conference' && /(^|\.)proceedings\.mlr\.press$/i.test(host)) {
+    const m = /\/v(\d+)\//.exec(pageUrl);
+    if (m) ref.volume = m[1];
+  }
   ref.accessed = todayIso(now);
   return compactReference(ref);
 }
@@ -1210,6 +1404,7 @@ function ldName(a) {
 
 const S2_FIELDS = 'title,authors,year,venue,journal,externalIds,publicationVenue,publicationTypes';
 const S2_URL_HOSTS = ['arxiv.org', 'aclweb.org', 'aclanthology.org', 'acm.org', 'biorxiv.org', 'medrxiv.org', 'dblp.org', 'pubmed.ncbi.nlm.nih.gov', 'semanticscholar.org', 'openreview.net'];
+const S2_BACKOFF_MS = 2000;
 
 /**
  * @typedef {Object} Ctx
@@ -1218,12 +1413,25 @@ const S2_URL_HOSTS = ['arxiv.org', 'aclweb.org', 'aclanthology.org', 'acm.org', 
  * @property {Date} now
  * @property {(ms: number) => Promise<void>} sleep
  * @property {string[]} warnings
+ * @property {Source[]} sources
+ * @property {string} [metaEndpoint]
+ * @property {boolean} wayback
  */
+
+/** Default page-fetching function URL: same-origin /api/meta in browsers, none elsewhere. */
+function defaultMetaEndpoint() {
+  try {
+    const origin = typeof location !== 'undefined' && location ? location.origin : '';
+    if (/^https?:\/\//i.test(origin)) return new URL('/api/meta', origin).href;
+  } catch { /* no usable location */ }
+  return undefined;
+}
 
 /**
  * Resolve any supported identifier or URL to a Reference.
  * @param {string} input
- * @param {{fetch?: typeof fetch, signal?: AbortSignal, now?: Date, sleep?: (ms: number) => Promise<void>}} [options]
+ * @param {{fetch?: typeof fetch, signal?: AbortSignal, now?: Date, sleep?: (ms: number) => Promise<void>,
+ *   metaEndpoint?: string|null, wayback?: boolean}} [options]
  */
 async function resolveReference(input, options = {}) {
   const identifier = detectIdentifier(input);
@@ -1237,19 +1445,27 @@ async function resolveReference(input, options = {}) {
     now: options.now instanceof Date ? options.now : new Date(),
     sleep: options.sleep || defaultSleep,
     warnings: [],
+    sources: [],
+    metaEndpoint: 'metaEndpoint' in options ? (options.metaEndpoint ? String(options.metaEndpoint) : undefined) : defaultMetaEndpoint(),
+    wayback: options.wayback !== false,
   };
   const strategies = {
     doi: resolveDoi, arxiv: resolveArxiv, pmid: resolvePmid, pmcid: resolvePmcid, openreview: resolveOpenReview,
-    acl: (id, c) => resolveS2(`ACL:${id.id}`, c), s2: (id, c) => resolveS2(id.id, c), isbn: resolveIsbn, url: resolveUrl,
+    acl: resolveAcl, s2: (id, c) => resolveS2(id.id, c), isbn: resolveIsbn, url: resolveUrl,
   };
   try {
     const result = await strategies[identifier.kind](identifier, ctx);
-    return { ...result, identifier, warnings: ctx.warnings };
+    return { ...result, identifier, warnings: ctx.warnings, sources: ctx.sources };
   } catch (err) {
-    if (err instanceof ResolveError && err.partial) throw err;
+    if (err instanceof ResolveError && err.partial) {
+      err.partial.identifier = err.partial.identifier || identifier;
+      err.partial.warnings = err.partial.warnings || ctx.warnings;
+      err.partial.sources = err.partial.sources || ctx.sources;
+      throw err;
+    }
     const message = err instanceof ResolveError ? err.message : `Unexpected error: ${err && err.message ? err.message : err}`;
     if (!ctx.warnings.includes(message)) ctx.warnings.push(message);
-    throw new ResolveError(message, { reference: urlOnlyReference(identifier, ctx), source: 'url-only', identifier, warnings: ctx.warnings });
+    throw new ResolveError(message, { reference: urlOnlyReference(identifier, ctx), source: 'url-only', identifier, warnings: ctx.warnings, sources: ctx.sources });
   }
 }
 
@@ -1259,39 +1475,167 @@ function urlOnlyReference(identifier, ctx) {
   if (identifier.kind === 'doi') ref.doi = identifier.id;
   if (identifier.kind === 'arxiv') { ref.type = 'preprint'; ref.archive = 'arXiv'; ref.archiveId = identifier.id; }
   if (identifier.kind === 'url') ref.containerTitle = hostOf(identifier.url);
+  if (identifier.kind === 'openreview') ref.type = 'paper-conference';
   const out = compactReference(ref);
   out.title = '';
   return out;
 }
 
-/** Run `fn`; on failure record the message in warnings and return null. */
-async function attempt(ctx, fn) {
+/** Build a ResolveError with a short machine-friendly `reason` for the sources list. */
+function fail(message, reason) {
+  const err = new ResolveError(message);
+  if (reason) err.reason = reason;
+  return err;
+}
+
+/** Short reason for the sources list. */
+function shortReason(err) {
+  if (!err) return 'failed';
+  if (err.reason) return err.reason;
+  if (err.rateLimited || err.status === 429) return 'rate limited';
+  if (err.status === 404) return 'not found';
+  if (err.status === 403) return 'forbidden';
+  if (err.status) return `HTTP ${err.status}`;
+  if (err.timeout) return 'timed out';
+  if (err.networkError) return 'unreachable (blocked by CORS or offline)';
+  const m = err.message ? String(err.message) : String(err);
+  return m.length > 60 ? `${m.slice(0, 57)}…` : m;
+}
+
+/**
+ * Run one source attempt: on success record it as 'ok' and return the value;
+ * on failure record it as 'failed' (with the message in warnings) and return null.
+ * Aborts always propagate.
+ * @template T
+ * @param {Ctx} ctx @param {string} name @param {() => Promise<T>} fn
+ * @returns {Promise<T|null>}
+ */
+async function step(ctx, name, fn) {
+  try {
+    const out = await fn();
+    ctx.sources.push({ name, status: 'ok' });
+    return out;
+  } catch (err) {
+    if (ctx.signal && ctx.signal.aborted) throw err;
+    const message = err && err.message ? err.message : String(err);
+    if (!ctx.warnings.includes(message)) ctx.warnings.push(message);
+    ctx.sources.push({ name, status: 'failed', detail: shortReason(err), message });
+    return null;
+  }
+}
+
+/** Record a source that was deliberately not tried. */
+function skip(ctx, name, detail) {
+  ctx.sources.push({ name, status: 'skipped', detail });
+}
+
+/**
+ * Run a nested chain (which records its own steps); swallow its final error
+ * so the caller can fall back. Aborts always propagate.
+ */
+async function quietly(ctx, fn) {
   try {
     return await fn();
   } catch (err) {
     if (ctx.signal && ctx.signal.aborted) throw err;
-    ctx.warnings.push(err && err.message ? err.message : String(err));
     return null;
   }
+}
+
+/** Summarise the failed attempts since `from` for an error message. */
+function summary(ctx, from) {
+  return ctx.sources.slice(from).filter((s) => s.status === 'failed')
+    .map((s) => `${SOURCE_NAMES[s.name] || s.name}: ${s.detail}`).join('; ');
+}
+
+const SOURCE_NAMES = {
+  crossref: 'Crossref', datacite: 'DataCite', 'doi.org': 'doi.org', arxiv: 'arXiv API', semanticscholar: 'Semantic Scholar',
+  'openreview-api2': 'OpenReview API2', 'openreview-api1': 'OpenReview API1', pubmed: 'PubMed', pmc: 'PubMed Central',
+  openlibrary: 'Open Library', 'api-meta': 'page fetch (/api/meta)', direct: 'direct fetch', wayback: 'Internet Archive',
+};
+
+/** Prefer the caller's DOI casing when the record spells the same DOI differently. */
+function keepDoiCase(reference, doi) {
+  if (reference.doi && doi && reference.doi !== doi && reference.doi.toLowerCase() === doi.toLowerCase() && !/^10\.48550\//i.test(doi)) {
+    reference.doi = doi;
+    if (reference.url === `https://doi.org/${reference.doi.toLowerCase()}` || reference.url === `https://doi.org/${reference.doi.toUpperCase()}`) reference.url = `https://doi.org/${doi}`;
+  }
+  return reference;
 }
 
 /** @param {Identifier} id @param {Ctx} ctx */
 async function resolveDoi(id, ctx) {
   const doi = id.id;
-  const crossref = await attempt(ctx, async () => {
+  const arxiv = /^10\.48550\/arxiv\.(.+)$/i.exec(doi);
+  if (arxiv && arxivId(arxiv[1])) {
+    skip(ctx, 'crossref', 'arXiv DOIs are registered with DataCite');
+    const ax = arxivId(arxiv[1]);
+    return resolveArxiv({ kind: 'arxiv', id: ax.id, url: `https://arxiv.org/abs/${ax.id}`, version: ax.version }, ctx);
+  }
+  const from = ctx.sources.length;
+  const crossref = await step(ctx, 'crossref', async () => {
     const json = await fetchJson(`https://api.crossref.org/works/${encodeURIComponent(doi)}`, { ...ctx, service: 'Crossref', subject: doi });
-    if (!json || !json.message) throw new ResolveError(`Crossref returned no record for ${doi}`);
-    return { reference: fromCrossref(json.message), source: 'crossref' };
+    if (!json || !json.message) throw fail(`Crossref returned no record for ${doi}`, 'no record');
+    return { reference: keepDoiCase(fromCrossref(json.message), doi), source: 'crossref' };
   });
   if (crossref) return crossref;
-  const json = await fetchJson(`https://api.datacite.org/dois/${encodeURIComponent(doi)}`, { ...ctx, service: 'DataCite', subject: doi });
-  if (!json || !json.data || !json.data.attributes) throw new ResolveError(`DataCite returned no record for ${doi}`);
-  return { reference: fromDatacite(json.data.attributes), source: 'datacite' };
+  const datacite = await step(ctx, 'datacite', async () => {
+    const json = await fetchJson(`https://api.datacite.org/dois/${encodeURIComponent(doi)}`, { ...ctx, service: 'DataCite', subject: doi });
+    if (!json || !json.data || !json.data.attributes) throw fail(`DataCite returned no record for ${doi}`, 'no record');
+    return { reference: keepDoiCase(fromDatacite(json.data.attributes), doi), source: 'datacite' };
+  });
+  if (datacite) return datacite;
+  const csl = await step(ctx, 'doi.org', async () => {
+    const json = await fetchJson(`https://doi.org/${encodeDoiPath(doi)}`, { ...ctx, service: 'doi.org', subject: doi, accept: 'application/vnd.citationstyles.csl+json' });
+    if (!json || typeof json !== 'object' || !(json.title || json.DOI)) throw fail(`doi.org returned no citation data for ${doi}`, 'no record');
+    return { reference: keepDoiCase(fromCsl(json), doi), source: 'doi.org' };
+  });
+  if (csl) return csl;
+  throw new ResolveError(`No metadata source knows the DOI ${doi} (${summary(ctx, from)})`);
+}
+
+/** Encode a DOI for use in a doi.org path: keep "/" but escape everything else that matters. */
+function encodeDoiPath(doi) {
+  return doi.split('/').map((part) => encodeURIComponent(part)).join('/');
+}
+
+/** Reduce any record of an arXiv paper to the preprint we cite. */
+function asArxivPreprint(reference, id) {
+  const ref = { ...reference, type: 'preprint', archive: 'arXiv', archiveId: id, url: `https://arxiv.org/abs/${id}` };
+  for (const k of ['containerTitle', 'collectionTitle', 'volume', 'issue', 'page', 'articleNumber', 'publisher', 'pmid']) delete ref[k];
+  if (!ref.doi || /^10\.48550\//i.test(ref.doi)) ref.doi = `10.48550/arXiv.${id}`;
+  return compactReference(ref);
 }
 
 /** @param {Identifier} id @param {Ctx} ctx */
 async function resolveArxiv(id, ctx) {
-  const arxiv = await attempt(ctx, () => withArxivLock(async () => {
+  const from = ctx.sources.length;
+  const datacite = await step(ctx, 'datacite', async () => {
+    const doi = `10.48550/arXiv.${id.id}`;
+    const json = await fetchJson(`https://api.datacite.org/dois/${encodeURIComponent(doi)}`, { ...ctx, service: 'DataCite', subject: `arXiv:${id.id}` });
+    if (!json || !json.data || !json.data.attributes) throw fail(`DataCite returned no record for ${doi}`, 'no record');
+    const reference = fromDataciteArxiv(json.data.attributes, id.id);
+    if (!reference.title) throw fail(`DataCite's record for arXiv:${id.id} has no title`, 'no usable metadata');
+    return { reference, source: 'datacite' };
+  });
+  if (datacite) return datacite;
+
+  const s2 = await step(ctx, 'semanticscholar', async () => {
+    const json = await s2Paper(`ARXIV:${id.id}`, ctx);
+    const mapped = fromSemanticScholar(json);
+    const published = json.externalIds && collapse(json.externalIds.DOI);
+    const reference = asArxivPreprint(mapped, id.id);
+    if (published && !/^10\.48550\//i.test(published)) {
+      reference.doi = `10.48550/arXiv.${id.id}`;
+      ctx.warnings.push(`A published version exists (DOI ${published}); this entry cites the arXiv preprint.`);
+    } else if (mapped.containerTitle && mapped.type !== 'preprint') {
+      ctx.warnings.push(`Semantic Scholar lists this paper in "${mapped.containerTitle}"; this entry cites the arXiv preprint.`);
+    }
+    return { reference, source: 'semanticscholar' };
+  });
+  if (s2) return s2;
+
+  const atom = await step(ctx, 'arxiv', () => withArxivLock(async () => {
     const xml = await fetchText(`https://export.arxiv.org/api/query?id_list=${encodeURIComponent(id.id)}&max_results=1`, { ...ctx, service: 'arXiv', subject: id.id, accept: 'application/atom+xml, application/xml, text/xml' });
     const reference = fromArxivAtom(xml, id.id);
     if (reference.doi || reference.note) {
@@ -1299,63 +1643,110 @@ async function resolveArxiv(id, ctx) {
     }
     return { reference, source: 'arxiv' };
   }));
-  if (arxiv) return arxiv;
-  return resolveS2(`ARXIV:${id.id}`, ctx, { reresolveDoi: false });
+  if (atom) return atom;
+  throw new ResolveError(`Could not find arXiv:${id.id} (${summary(ctx, from)})`);
 }
 
 /**
- * Semantic Scholar lookup by any supported paper id ("ARXIV:…", "ACL:…", "URL:…", sha, "CorpusID:n").
- * Retries once after 1.5 s on HTTP 429. If the result has a (non-arXiv) DOI, Crossref is preferred.
+ * GET one Semantic Scholar paper. The shared pool answers 429 often and that
+ * response has no CORS header (browsers see a TypeError): both cases wait
+ * 2 s and retry once, then give up with a rate-limit error.
+ * @param {string} paperId  "ARXIV:…", "ACL:…", "URL:…", sha, "CorpusID:n"
+ * @param {Ctx} ctx
+ */
+async function s2Paper(paperId, ctx) {
+  const url = `https://api.semanticscholar.org/graph/v1/paper/${paperId.startsWith('URL:') ? `URL:${encodeURIComponent(paperId.slice(4))}` : encodeURIComponent(paperId).replace(/%3A/g, ':')}?fields=${S2_FIELDS}`;
+  const opts = { ...ctx, service: 'Semantic Scholar', subject: paperId, accept: 'application/json' };
+  const transient = (err) => err && (err.status === 429 || err.networkError);
+  let json;
+  try {
+    json = await fetchJson(url, opts);
+  } catch (err) {
+    if (!transient(err)) throw err;
+    await ctx.sleep(S2_BACKOFF_MS);
+    try {
+      json = await fetchJson(url, opts);
+    } catch (err2) {
+      if (!transient(err2)) throw err2;
+      const limited = new ResolveError(`Semantic Scholar is rate-limited right now (${err2.status ? `HTTP ${err2.status}` : 'request blocked'} for ${paperId}); try again in a moment`);
+      limited.rateLimited = true;
+      limited.status = err2.status || 429;
+      throw limited;
+    }
+  }
+  if (!json || !json.paperId) throw fail(`Semantic Scholar has no record for ${paperId}`, 'no record');
+  return json;
+}
+
+/**
+ * Semantic Scholar lookup by any supported paper id. If the result has a
+ * (non-arXiv) DOI, the DOI chain is preferred for richer data.
  * @param {string} paperId
  * @param {Ctx} ctx
  * @param {{reresolveDoi?: boolean}} [opts]
  */
 async function resolveS2(paperId, ctx, opts = {}) {
-  const url = `https://api.semanticscholar.org/graph/v1/paper/${paperId.startsWith('URL:') ? `URL:${encodeURIComponent(paperId.slice(4))}` : encodeURIComponent(paperId).replace(/%3A/g, ':')}?fields=${S2_FIELDS}`;
-  let json;
-  try {
-    json = await fetchJson(url, { ...ctx, service: 'Semantic Scholar', subject: paperId });
-  } catch (err) {
-    if (err.status !== 429) throw err;
-    await ctx.sleep(1500);
-    json = await fetchJson(url, { ...ctx, service: 'Semantic Scholar', subject: paperId });
-  }
-  if (!json || !json.paperId) throw new ResolveError(`Semantic Scholar has no record for ${paperId}`);
-  const reference = fromSemanticScholar(json);
+  const s2 = await step(ctx, 'semanticscholar', async () => ({ reference: fromSemanticScholar(await s2Paper(paperId, ctx)), source: 'semanticscholar' }));
+  if (!s2) throw new ResolveError(ctx.sources[ctx.sources.length - 1].message);
+  const { reference } = s2;
   if (opts.reresolveDoi !== false && reference.doi && !/^10\.48550\//i.test(reference.doi)) {
-    const better = await attempt(ctx, () => resolveDoi({ kind: 'doi', id: reference.doi, url: `https://doi.org/${reference.doi}` }, ctx));
+    const better = await quietly(ctx, () => resolveDoi({ kind: 'doi', id: reference.doi, url: `https://doi.org/${reference.doi}` }, ctx));
     if (better) return better;
   }
-  return { reference, source: 'semanticscholar' };
+  return s2;
+}
+
+/** @param {Identifier} id @param {Ctx} ctx */
+async function resolveAcl(id, ctx) {
+  const from = ctx.sources.length;
+  const doi = `10.18653/v1/${id.id}`;
+  const crossref = await step(ctx, 'crossref', async () => {
+    const json = await fetchJson(`https://api.crossref.org/works/${encodeURIComponent(doi)}`, { ...ctx, service: 'Crossref', subject: doi });
+    if (!json || !json.message) throw fail(`Crossref returned no record for ${doi}`, 'no record');
+    const reference = fromCrossref(json.message);
+    if (!reference.title) throw fail(`Crossref's record for ${doi} has no title`, 'no usable metadata');
+    return { reference, source: 'crossref' };
+  });
+  if (crossref) return crossref;
+  const s2 = await quietly(ctx, () => resolveS2(`ACL:${id.id}`, ctx, { reresolveDoi: false }));
+  if (s2) return s2;
+  throw new ResolveError(`Could not find ACL Anthology paper ${id.id} (${summary(ctx, from)})`);
 }
 
 /** @param {Identifier} id @param {Ctx} ctx */
 async function resolvePmid(id, ctx) {
-  const json = await fetchJson(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${encodeURIComponent(id.id)}&retmode=json`, { ...ctx, service: 'PubMed', subject: `PMID ${id.id}` });
-  const record = json && json.result && json.result[id.id];
-  if (!record || record.error) throw new ResolveError(`PubMed has no record for PMID ${id.id}${record && record.error ? ` (${record.error})` : ''}`);
-  const reference = fromPubmedSummary(record);
-  if (reference.doi) {
-    const better = await attempt(ctx, () => resolveDoi({ kind: 'doi', id: reference.doi, url: `https://doi.org/${reference.doi}` }, ctx));
+  const pubmed = await step(ctx, 'pubmed', async () => {
+    const json = await fetchJson(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${encodeURIComponent(id.id)}&retmode=json`, { ...ctx, service: 'PubMed', subject: `PMID ${id.id}` });
+    const record = json && json.result && json.result[id.id];
+    if (!record || record.error) throw fail(`PubMed has no record for PMID ${id.id}${record && record.error ? ` (${record.error})` : ''}`, 'no record');
+    return { reference: fromPubmedSummary(record), source: 'pubmed' };
+  });
+  if (!pubmed) throw new ResolveError(ctx.sources[ctx.sources.length - 1].message);
+  if (pubmed.reference.doi) {
+    const better = await quietly(ctx, () => resolveDoi({ kind: 'doi', id: pubmed.reference.doi, url: `https://doi.org/${pubmed.reference.doi}` }, ctx));
     if (better) return better;
   }
-  return { reference, source: 'pubmed' };
+  return pubmed;
 }
 
 /** @param {Identifier} id @param {Ctx} ctx */
 async function resolvePmcid(id, ctx) {
   const digits = id.id.replace(/^PMC/i, '');
-  const json = await fetchJson(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pmc&id=${encodeURIComponent(digits)}&retmode=json`, { ...ctx, service: 'PubMed Central', subject: id.id });
-  const record = json && json.result && json.result[digits];
-  if (!record || record.error) throw new ResolveError(`PubMed Central has no record for ${id.id}`);
-  const reference = fromPubmedSummary(record);
+  const pmc = await step(ctx, 'pmc', async () => {
+    const json = await fetchJson(`https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pmc&id=${encodeURIComponent(digits)}&retmode=json`, { ...ctx, service: 'PubMed Central', subject: id.id });
+    const record = json && json.result && json.result[digits];
+    if (!record || record.error) throw fail(`PubMed Central has no record for ${id.id}`, 'no record');
+    return { record, reference: fromPubmedSummary(record), source: 'pubmed' };
+  });
+  if (!pmc) throw new ResolveError(ctx.sources[ctx.sources.length - 1].message);
+  const { record, reference } = pmc;
   if (reference.doi) {
-    const better = await attempt(ctx, () => resolveDoi({ kind: 'doi', id: reference.doi, url: `https://doi.org/${reference.doi}` }, ctx));
+    const better = await quietly(ctx, () => resolveDoi({ kind: 'doi', id: reference.doi, url: `https://doi.org/${reference.doi}` }, ctx));
     if (better) return better;
   }
   const pmid = ((Array.isArray(record.articleids) ? record.articleids : []).find((x) => x && x.idtype === 'pmid') || {}).value;
   if (pmid) {
-    const better = await attempt(ctx, () => resolvePmid({ kind: 'pmid', id: String(pmid), url: '' }, ctx));
+    const better = await quietly(ctx, () => resolvePmid({ kind: 'pmid', id: String(pmid), url: '' }, ctx));
     if (better) return better;
   }
   return { reference, source: 'pubmed' };
@@ -1363,12 +1754,22 @@ async function resolvePmcid(id, ctx) {
 
 /** @param {Identifier} id @param {Ctx} ctx */
 async function resolveOpenReview(id, ctx) {
-  for (const [base, label] of [['https://api2.openreview.net', 'OpenReview API2'], ['https://api.openreview.net', 'OpenReview API1']]) {
-    const found = await attempt(ctx, async () => {
-      const json = await fetchJson(`${base}/notes?forum=${encodeURIComponent(id.id)}`, { ...ctx, service: label, subject: id.id });
+  let challenged = false;
+  for (const [base, label, name] of [['https://api2.openreview.net', 'OpenReview API2', 'openreview-api2'], ['https://api.openreview.net', 'OpenReview API1', 'openreview-api1']]) {
+    const found = await step(ctx, name, async () => {
+      let json;
+      try {
+        json = await fetchJson(`${base}/notes?forum=${encodeURIComponent(id.id)}`, { ...ctx, service: label, subject: id.id });
+      } catch (err) {
+        if (err && err.status === 403 && /ChallengeRequiredError|Challenge verification/i.test(err.body || '')) {
+          challenged = true;
+          throw fail(`${label} refused the request with an anti-bot challenge (HTTP 403)`, 'blocked by anti-bot challenge');
+        }
+        throw err;
+      }
       const notes = json && Array.isArray(json.notes) ? json.notes : [];
       const note = notes.find((n) => n && n.id === id.id) || notes.find((n) => n && n.forum === id.id && !n.replyto) || null;
-      if (!note) throw new ResolveError(`${label} has no note for ${id.id}`);
+      if (!note) throw fail(`${label} has no note for ${id.id}`, 'no record');
       const reference = fromOpenReview(note);
       const result = { reference, source: 'openreview' };
       if (reference.bibtex) { result.bibtex = reference.bibtex; delete reference.bibtex; }
@@ -1376,16 +1777,49 @@ async function resolveOpenReview(id, ctx) {
     });
     if (found) return found;
   }
-  return resolveS2(`URL:${id.url}`, ctx);
+  const s2 = await quietly(ctx, () => resolveS2(`URL:${id.url}`, ctx));
+  if (s2) return s2;
+  const partial = { reference: urlOnlyReference(id, ctx), source: 'url-only', identifier: id, warnings: ctx.warnings, sources: ctx.sources };
+  throw new ResolveError(
+    `${challenged ? 'OpenReview blocked the request from your browser (anti-bot challenge)' : 'OpenReview could not be reached from your browser'} and Semantic Scholar has no usable record for this forum. `
+    + 'Paste the paper\'s arXiv link, its DOI, or the BibTeX from the OpenReview page instead, or fill in the fields below.',
+    partial,
+  );
 }
 
 /** @param {Identifier} id @param {Ctx} ctx */
 async function resolveIsbn(id, ctx) {
   const key = `ISBN:${id.id}`;
-  const json = await fetchJson(`https://openlibrary.org/api/books?bibkeys=${encodeURIComponent(key)}&format=json&jscmd=data`, { ...ctx, service: 'Open Library', subject: id.id });
-  const book = json && json[key];
-  if (!book) throw new ResolveError(`Open Library has no record for ISBN ${id.id}`);
-  return { reference: fromOpenLibrary(book), source: 'openlibrary' };
+  const book = await step(ctx, 'openlibrary', async () => {
+    const json = await fetchJson(`https://openlibrary.org/api/books?bibkeys=${encodeURIComponent(key)}&format=json&jscmd=data`, { ...ctx, service: 'Open Library', subject: id.id });
+    const record = json && json[key];
+    if (!record) throw fail(`Open Library has no record for ISBN ${id.id}`, 'no record');
+    return { reference: fromOpenLibrary(record), source: 'openlibrary' };
+  });
+  if (!book) throw new ResolveError(ctx.sources[ctx.sources.length - 1].message);
+  return book;
+}
+
+/**
+ * Turn page HTML into a result; richer chains are tried when the page names a
+ * DOI or arXiv id. Throws when the page yields no title at all.
+ * @param {Ctx} ctx @param {string} html @param {string} pageUrl @param {string} source
+ */
+async function htmlResult(ctx, html, pageUrl, source) {
+  const reference = fromHtmlMeta(html, pageUrl, ctx.now);
+  if (!reference.title) throw fail(`${hostOf(pageUrl) || 'The page'} has no usable metadata (no title found)`, 'no usable metadata');
+  if (reference.doi) {
+    const better = await quietly(ctx, () => resolveDoi({ kind: 'doi', id: reference.doi, url: `https://doi.org/${reference.doi}` }, ctx));
+    if (better) return better;
+  }
+  if (reference.archiveId && /arxiv/i.test(reference.archive || '')) {
+    const ax = arxivId(reference.archiveId);
+    if (ax) {
+      const better = await quietly(ctx, () => resolveArxiv({ kind: 'arxiv', id: ax.id, url: `https://arxiv.org/abs/${ax.id}` }, ctx));
+      if (better) return better;
+    }
+  }
+  return { reference, source };
 }
 
 /** @param {Identifier} id @param {Ctx} ctx */
@@ -1393,27 +1827,58 @@ async function resolveUrl(id, ctx) {
   const url = id.url;
   const host = hostOf(url);
   if (S2_URL_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))) {
-    const viaS2 = await attempt(ctx, () => resolveS2(`URL:${url}`, ctx));
+    const viaS2 = await quietly(ctx, () => resolveS2(`URL:${url}`, ctx));
     if (viaS2) return viaS2;
   }
-  const viaHtml = await attempt(ctx, async () => {
+
+  // (a) Same-origin page-fetching function.
+  if (ctx.metaEndpoint) {
+    const viaFunction = await step(ctx, 'api-meta', async () => {
+      const endpoint = `${ctx.metaEndpoint}${ctx.metaEndpoint.includes('?') ? '&' : '?'}url=${encodeURIComponent(url)}`;
+      const res = await fetchResponse(endpoint, { ...ctx, service: 'The page-fetching function', accept: 'application/json', allowErrorStatus: true });
+      let body = null;
+      try { body = await res.json(); } catch { body = null; }
+      if (!body || typeof body !== 'object' || !('ok' in body)) {
+        if (res.status === 404) throw fail('The page-fetching function (/api/meta) is not available on this host', 'not available here');
+        throw fail(`The page-fetching function returned ${res.status}`, `HTTP ${res.status}`);
+      }
+      if (!body.ok) throw fail(`Could not fetch ${host || 'the page'}: ${body.error || `HTTP ${res.status}`}`, body.status ? `page answered HTTP ${body.status}` : 'page unreachable');
+      return htmlResult(ctx, str(body.head), collapse(body.url) || url, 'html-meta');
+    });
+    if (viaFunction) return viaFunction;
+  } else {
+    skip(ctx, 'api-meta', 'no page-fetching function configured');
+  }
+
+  // (b) Direct fetch (works on sites that send CORS headers).
+  const direct = await step(ctx, 'direct', async () => {
     const html = await fetchText(url, { ...ctx, service: host || 'The page', accept: 'text/html, application/xhtml+xml' });
-    const reference = fromHtmlMeta(html, url, ctx.now);
-    if (reference.doi) {
-      const better = await attempt(ctx, () => resolveDoi({ kind: 'doi', id: reference.doi, url: `https://doi.org/${reference.doi}` }, ctx));
-      if (better) return better;
-    }
-    if (reference.archiveId && /arxiv/i.test(reference.archive || '')) {
-      const better = await attempt(ctx, () => resolveArxiv({ kind: 'arxiv', id: reference.archiveId, url: `https://arxiv.org/abs/${reference.archiveId}` }, ctx));
-      if (better) return better;
-    }
-    if (!reference.title) ctx.warnings.push('The page has no usable metadata; please fill in the title and author.');
-    return { reference, source: 'html-meta' };
+    return htmlResult(ctx, html, url, 'html-meta');
   });
-  if (viaHtml) return viaHtml;
-  const partial = { reference: urlOnlyReference(id, ctx), source: 'url-only', identifier: id, warnings: ctx.warnings };
+  if (direct) return direct;
+
+  // (c) Internet Archive snapshot (raw, via the id_ flag).
+  if (ctx.wayback) {
+    const archived = await step(ctx, 'wayback', async () => {
+      const avail = await fetchJson(`https://archive.org/wayback/available?url=${encodeURIComponent(url)}`, { ...ctx, service: 'The Internet Archive', subject: url });
+      const closest = avail && avail.archived_snapshots && avail.archived_snapshots.closest;
+      const ts = closest && closest.available !== false ? collapse(closest.timestamp) : '';
+      if (!/^\d{8}/.test(ts)) throw fail('The Internet Archive has no snapshot of this page', 'no snapshot');
+      const html = await fetchText(`https://web.archive.org/web/${ts}id_/${url}`, { ...ctx, service: 'The Internet Archive', subject: url, accept: 'text/html, application/xhtml+xml' });
+      const result = await htmlResult(ctx, html, url, 'wayback');
+      if (/(^|\.)archive\.org$/i.test(hostOf(result.reference.url))) result.reference.url = url;
+      ctx.warnings.push(`Metadata read from an Internet Archive snapshot dated ${ts.slice(0, 4)}-${ts.slice(4, 6)}-${ts.slice(6, 8)}; check it against the live page.`);
+      return result;
+    });
+    if (archived) return archived;
+  } else {
+    skip(ctx, 'wayback', 'disabled');
+  }
+
+  // (d) Give up with a URL-only partial.
+  const partial = { reference: urlOnlyReference(id, ctx), source: 'url-only', identifier: id, warnings: ctx.warnings, sources: ctx.sources };
   throw new ResolveError(
-    `Could not read ${host || 'the page'} from your browser: web pages normally do not allow cross-origin reads (CORS), so only the URL and site name could be filled in; please add the title, author and date by hand.`,
+    `Could not read ${host || 'the page'}: web pages normally do not allow cross-origin reads (CORS) and neither this site's page fetcher nor the Internet Archive could supply its metadata, so only the URL and site name could be filled in; please add the title, author and date by hand.`,
     partial,
   );
 }

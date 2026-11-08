@@ -1,0 +1,33 @@
+{
+  "type": "software",
+  "id": "https://doi.org/10.5281/zenodo.3509134",
+  "categories": [
+    "python",
+    "data science",
+    "flexible",
+    "pandas",
+    "alignment",
+    "data analysis"
+  ],
+  "author": [
+    {
+      "family": "The pandas development team"
+    }
+  ],
+  "issued": {
+    "date-parts": [
+      [
+        2026,
+        11,
+        4
+      ]
+    ]
+  },
+  "abstract": "Pandas is a powerful data structures for data analysis, time series, and statistics.",
+  "DOI": "10.5281/ZENODO.3509134",
+  "publisher": "Zenodo",
+  "title": "pandas-dev/pandas: Pandas",
+  "URL": "https://zenodo.org/doi/10.5281/zenodo.3509134",
+  "copyright": "BSD 3-Clause \"New\" or \"Revised\" License",
+  "version": "v3.1.1"
+}

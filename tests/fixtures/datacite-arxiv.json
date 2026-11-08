@@ -6,50 +6,528 @@
       "doi": "10.48550/arxiv.1706.03762",
       "prefix": "10.48550",
       "suffix": "arxiv.1706.03762",
-      "identifiers": [{ "identifier": "1706.03762", "identifierType": "arXiv" }],
-      "alternateIdentifiers": [{ "alternateIdentifier": "1706.03762", "alternateIdentifierType": "arXiv" }],
-      "creators": [
-        { "name": "Vaswani, Ashish", "nameType": "Personal", "givenName": "Ashish", "familyName": "Vaswani", "affiliation": [], "nameIdentifiers": [] },
-        { "name": "Shazeer, Noam", "nameType": "Personal", "givenName": "Noam", "familyName": "Shazeer", "affiliation": [], "nameIdentifiers": [] },
-        { "name": "Parmar, Niki", "nameType": "Personal", "givenName": "Niki", "familyName": "Parmar", "affiliation": [], "nameIdentifiers": [] },
-        { "name": "Uszkoreit, Jakob", "nameType": "Personal", "givenName": "Jakob", "familyName": "Uszkoreit", "affiliation": [], "nameIdentifiers": [] },
-        { "name": "Jones, Llion", "nameType": "Personal", "givenName": "Llion", "familyName": "Jones", "affiliation": [], "nameIdentifiers": [] },
-        { "name": "Gomez, Aidan N.", "nameType": "Personal", "givenName": "Aidan N.", "familyName": "Gomez", "affiliation": [], "nameIdentifiers": [] },
-        { "name": "Kaiser, Lukasz", "nameType": "Personal", "givenName": "Lukasz", "familyName": "Kaiser", "affiliation": [], "nameIdentifiers": [] },
-        { "name": "Polosukhin, Illia", "nameType": "Personal", "givenName": "Illia", "familyName": "Polosukhin", "affiliation": [], "nameIdentifiers": [] }
+      "identifiers": [
+        {
+          "identifier": "1706.03762",
+          "identifierType": "arXiv"
+        }
       ],
-      "titles": [{ "title": "Attention Is All You Need" }],
+      "alternateIdentifiers": [
+        {
+          "alternateIdentifierType": "arXiv",
+          "alternateIdentifier": "1706.03762"
+        }
+      ],
+      "creators": [
+        {
+          "name": "Vaswani, Ashish",
+          "nameType": "Personal",
+          "givenName": "Ashish",
+          "familyName": "Vaswani",
+          "affiliation": [],
+          "nameIdentifiers": []
+        },
+        {
+          "name": "Shazeer, Noam",
+          "nameType": "Personal",
+          "givenName": "Noam",
+          "familyName": "Shazeer",
+          "affiliation": [],
+          "nameIdentifiers": []
+        },
+        {
+          "name": "Parmar, Niki",
+          "nameType": "Personal",
+          "givenName": "Niki",
+          "familyName": "Parmar",
+          "affiliation": [],
+          "nameIdentifiers": []
+        },
+        {
+          "name": "Uszkoreit, Jakob",
+          "nameType": "Personal",
+          "givenName": "Jakob",
+          "familyName": "Uszkoreit",
+          "affiliation": [],
+          "nameIdentifiers": []
+        },
+        {
+          "name": "Jones, Llion",
+          "nameType": "Personal",
+          "givenName": "Llion",
+          "familyName": "Jones",
+          "affiliation": [],
+          "nameIdentifiers": []
+        },
+        {
+          "name": "Gomez, Aidan N.",
+          "nameType": "Personal",
+          "givenName": "Aidan N.",
+          "familyName": "Gomez",
+          "affiliation": [],
+          "nameIdentifiers": []
+        },
+        {
+          "name": "Kaiser, Lukasz",
+          "nameType": "Personal",
+          "givenName": "Lukasz",
+          "familyName": "Kaiser",
+          "affiliation": [],
+          "nameIdentifiers": []
+        },
+        {
+          "name": "Polosukhin, Illia",
+          "nameType": "Personal",
+          "givenName": "Illia",
+          "familyName": "Polosukhin",
+          "affiliation": [],
+          "nameIdentifiers": []
+        }
+      ],
+      "titles": [
+        {
+          "title": "Attention Is All You Need"
+        }
+      ],
       "publisher": "arXiv",
       "container": {},
       "publicationYear": 2017,
-      "subjects": [
-        { "lang": "en", "subject": "Computation and Language (cs.CL)", "schemeUri": "http://arxiv.org/archive/cs", "subjectScheme": "arXiv" },
-        { "subject": "FOS: Computer and information sciences", "subjectScheme": "Fields of Science and Technology (FOS)" }
-      ],
       "contributors": [],
       "dates": [
-        { "date": "2017-06-12T17:57:34Z", "dateType": "Submitted" },
-        { "date": "2023-08-02T00:00:00Z", "dateType": "Updated" },
-        { "date": "2017", "dateType": "Issued" }
+        {
+          "date": "2017-06-12T17:57:34Z",
+          "dateType": "Submitted",
+          "dateInformation": "v1"
+        },
+        {
+          "date": "2017-06-13T00:13:31Z",
+          "dateType": "Updated",
+          "dateInformation": "v1"
+        },
+        {
+          "date": "2017-06-19T16:49:45Z",
+          "dateType": "Submitted",
+          "dateInformation": "v2"
+        },
+        {
+          "date": "2017-06-20T00:14:05Z",
+          "dateType": "Updated",
+          "dateInformation": "v2"
+        },
+        {
+          "date": "2017-06-20T05:20:02Z",
+          "dateType": "Submitted",
+          "dateInformation": "v3"
+        },
+        {
+          "date": "2017-06-21T00:04:53Z",
+          "dateType": "Updated",
+          "dateInformation": "v3"
+        },
+        {
+          "date": "2017-06-30T17:29:30Z",
+          "dateType": "Submitted",
+          "dateInformation": "v4"
+        },
+        {
+          "date": "2017-07-03T00:08:10Z",
+          "dateType": "Updated",
+          "dateInformation": "v4"
+        },
+        {
+          "date": "2017-12-06T03:30:32Z",
+          "dateType": "Submitted",
+          "dateInformation": "v5"
+        },
+        {
+          "date": "2017-12-07T01:03:11Z",
+          "dateType": "Updated",
+          "dateInformation": "v5"
+        },
+        {
+          "date": "2023-07-24T00:48:54Z",
+          "dateType": "Submitted",
+          "dateInformation": "v6"
+        },
+        {
+          "date": "2023-07-25T00:34:06Z",
+          "dateType": "Updated",
+          "dateInformation": "v6"
+        },
+        {
+          "date": "2023-08-02T00:41:18Z",
+          "dateType": "Submitted",
+          "dateInformation": "v7"
+        },
+        {
+          "date": "2023-08-03T00:07:25Z",
+          "dateType": "Updated",
+          "dateInformation": "v7"
+        },
+        {
+          "date": "2017-06",
+          "dateType": "Available",
+          "dateInformation": "v1"
+        },
+        {
+          "date": "2017",
+          "dateType": "Issued"
+        }
       ],
       "language": null,
-      "types": { "ris": "GEN", "bibtex": "misc", "citeproc": "article", "schemaOrg": "CreativeWork", "resourceType": "Article", "resourceTypeGeneral": "Preprint" },
+      "types": {
+        "ris": "GEN",
+        "bibtex": "misc",
+        "citeproc": "article",
+        "schemaOrg": "CreativeWork",
+        "resourceType": "Article",
+        "resourceTypeGeneral": "Preprint"
+      },
       "relatedIdentifiers": [],
-      "sizes": [],
-      "formats": [],
       "version": "7",
-      "rightsList": [{ "rights": "arXiv.org perpetual, non-exclusive license", "rightsUri": "http://arxiv.org/licenses/nonexclusive-distrib/1.0/" }],
-      "descriptions": [{ "description": "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks ...", "descriptionType": "Abstract" }],
       "url": "https://arxiv.org/abs/1706.03762",
+      "metadataVersion": 2,
       "schemaVersion": "http://datacite.org/schema/kernel-4",
       "source": "mds",
       "isActive": true,
       "state": "findable",
-      "created": "2022-04-23T07:31:36.000Z",
-      "registered": "2022-04-23T07:31:37.000Z",
+      "reason": null,
+      "viewCount": 0,
+      "downloadCount": 0,
+      "referenceCount": 2,
+      "citationCount": 69,
+      "partCount": 0,
+      "partOfCount": 0,
+      "versionCount": 0,
+      "versionOfCount": 0,
+      "created": "2022-03-04T06:13:33.000Z",
+      "registered": "2022-03-04T06:13:34.000Z",
       "published": "2017",
-      "updated": "2023-08-03T00:12:51.000Z"
+      "updated": "2025-04-09T22:52:25.000Z"
     },
-    "relationships": { "client": { "data": { "id": "arxiv.content", "type": "clients" } } }
+    "relationships": {
+      "client": {
+        "data": {
+          "id": "arxiv.content",
+          "type": "clients"
+        }
+      },
+      "provider": {
+        "data": {
+          "id": "arxiv",
+          "type": "providers"
+        }
+      },
+      "media": {
+        "data": {
+          "id": "10.48550/arxiv.1706.03762",
+          "type": "media"
+        }
+      },
+      "references": {
+        "data": [
+          {
+            "id": "10.5281/zenodo.17459697",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.17459696",
+            "type": "dois"
+          }
+        ]
+      },
+      "citations": {
+        "data": [
+          {
+            "id": "10.5281/zenodo.23898013",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.23898012",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.22778603",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.23605043",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.23605042",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.17193256",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.22962074",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.20328350",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.22799689",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.22778602",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.19847348",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.20347695",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.20347694",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.20328351",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.19490262",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.21916913",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.21916912",
+            "type": "dois"
+          },
+          {
+            "id": "10.60797/irj.2026.167.100.3",
+            "type": "dois"
+          },
+          {
+            "id": "10.60797/irj.2026.167.100",
+            "type": "dois"
+          },
+          {
+            "id": "10.60797/irj.2026.167.100.2",
+            "type": "dois"
+          },
+          {
+            "id": "10.60797/irj.2026.167.100.1",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.20024213",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.19847349",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.19490263",
+            "type": "dois"
+          },
+          {
+            "id": "10.17175/sb007_005",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.18383733",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.18553990",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.18501161",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.18445696",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.18383734",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.18295747",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.18295746",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.17696100",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.14607601",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.17193257",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.15185971",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.14894877",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.14894878",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.14608740",
+            "type": "dois"
+          },
+          {
+            "id": "10.5281/zenodo.14607602",
+            "type": "dois"
+          },
+          {
+            "id": "10.4230/oasics.dx.2024.29",
+            "type": "dois"
+          },
+          {
+            "id": "10.6084/m9.figshare.26607052",
+            "type": "dois"
+          },
+          {
+            "id": "10.6084/m9.figshare.26607052.v1",
+            "type": "dois"
+          },
+          {
+            "id": "10.6084/m9.figshare.26595608.v1",
+            "type": "dois"
+          },
+          {
+            "id": "10.6084/m9.figshare.26595608",
+            "type": "dois"
+          },
+          {
+            "id": "10.4230/lipics.icdt.2024.1",
+            "type": "dois"
+          },
+          {
+            "id": "10.6084/m9.figshare.21563913.v1",
+            "type": "dois"
+          },
+          {
+            "id": "10.6084/m9.figshare.21563913",
+            "type": "dois"
+          },
+          {
+            "id": "10.1007/s12652-022-03860-7",
+            "type": "dois"
+          },
+          {
+            "id": "10.1016/j.media.2022.102474",
+            "type": "dois"
+          },
+          {
+            "id": "10.1016/j.energy.2022.124179",
+            "type": "dois"
+          },
+          {
+            "id": "10.1145/3396956.3397001",
+            "type": "dois"
+          },
+          {
+            "id": "10.3390/s22093283",
+            "type": "dois"
+          },
+          {
+            "id": "10.1080/09540091.2022.2061915",
+            "type": "dois"
+          },
+          {
+            "id": "10.1145/3485447.3512026",
+            "type": "dois"
+          },
+          {
+            "id": "10.1007/s10489-022-03523-2",
+            "type": "dois"
+          },
+          {
+            "id": "10.3390/electronics11081275",
+            "type": "dois"
+          },
+          {
+            "id": "10.1145/3524086.3524092",
+            "type": "dois"
+          },
+          {
+            "id": "10.1155/2022/5024399",
+            "type": "dois"
+          },
+          {
+            "id": "10.1145/3529388",
+            "type": "dois"
+          },
+          {
+            "id": "10.1007/s13042-022-01548-0",
+            "type": "dois"
+          },
+          {
+            "id": "10.1007/s43681-022-00148-6",
+            "type": "dois"
+          },
+          {
+            "id": "10.2196/preprints.37897",
+            "type": "dois"
+          },
+          {
+            "id": "10.1145/3412841.3441977",
+            "type": "dois"
+          },
+          {
+            "id": "10.1145/3508230.3508250",
+            "type": "dois"
+          },
+          {
+            "id": "10.1038/s41598-022-07846-5",
+            "type": "dois"
+          },
+          {
+            "id": "10.1145/3446132.3446403",
+            "type": "dois"
+          },
+          {
+            "id": "10.1073/pnas.2113348119",
+            "type": "dois"
+          },
+          {
+            "id": "10.1073/pnas.2102421118",
+            "type": "dois"
+          }
+        ]
+      },
+      "parts": {
+        "data": []
+      },
+      "partOf": {
+        "data": []
+      },
+      "versions": {
+        "data": []
+      },
+      "versionOf": {
+        "data": []
+      }
+    }
   }
 }

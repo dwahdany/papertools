@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>URL → APA citation · papertools</title>
-  <meta name="description" content="Paste a DOI, arXiv, OpenReview, PubMed, ACL Anthology or Semantic Scholar link — or any web page — and get an APA 7 reference with italics plus BibTeX. Runs entirely in your browser.">
+  <meta name="description" content="Paste a DOI, arXiv, OpenReview, PubMed, ACL Anthology or Semantic Scholar link — or any web page — and get an APA 7 reference with italics plus BibTeX. Paper lookups run in your browser; web pages are fetched by a small stateless function. Nothing is stored.">
   <link rel="stylesheet" href="/assets/style.css">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%F0%9F%93%9D%3C/text%3E%3C/svg%3E">
   <style>
@@ -16,6 +16,9 @@
     .chip { font-size: 0.8rem; padding: 0.1rem 0.55rem; border-radius: 999px; color: var(--fg-muted); }
     .chip:hover { color: var(--fg); }
     .status { min-height: 1.5rem; margin: 0.75rem 0 0; }
+    .sources { margin: 0.2rem 0 0; font-size: 0.8rem; }
+    .sources .source-ok { color: var(--fg); }
+    .sources .source-failed, .sources .source-skipped { color: var(--fg-muted); }
     .spinner {
       display: inline-block; width: 0.8em; height: 0.8em; margin-right: 0.4em; vertical-align: -0.1em;
       border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%;
@@ -58,7 +61,7 @@
   </header>
   <main>
     <h1>URL → APA citation</h1>
-    <p class="lead">Paste a link or identifier — DOI, arXiv, OpenReview, PubMed, ACL Anthology, Semantic Scholar, ISBN, a publisher page or any web page — and get an APA 7 reference with proper italics, plus BibTeX. Lookups go straight from your browser to the public metadata APIs.</p>
+    <p class="lead">Paste a link or identifier — DOI, arXiv, OpenReview, PubMed, ACL Anthology, Semantic Scholar, ISBN, a publisher page or any web page — and get an APA 7 reference with proper italics, plus BibTeX. Paper identifiers go straight from your browser to the public metadata APIs; ordinary web pages are read through a small stateless function on this site.</p>
 
     <form class="lookup" id="lookup" autocomplete="off">
       <label for="url" class="visually-hidden">URL, DOI or identifier</label>
@@ -72,9 +75,10 @@
       <button type="button" class="chip" data-q="https://openreview.net/forum?id=YicbFdNTTy">OpenReview</button>
       <button type="button" class="chip" data-q="https://pubmed.ncbi.nlm.nih.gov/31452104/">PubMed</button>
       <button type="button" class="chip" data-q="https://aclanthology.org/N19-1423/">ACL Anthology</button>
-      <button type="button" class="chip" data-q="https://www.anthropic.com/news/claude-3-family">Web page</button>
+      <button type="button" class="chip" data-q="https://blog.cloudflare.com/workers-ai/">Web page</button>
     </p>
     <p class="muted status" id="status" aria-live="polite"></p>
+    <p class="muted sources" id="sources" hidden></p>
 
     <div class="row" role="group" aria-label="Options">
       <label class="inline" for="opt-author-style">Author style
@@ -110,7 +114,7 @@
 
     <details class="card" id="edit" hidden>
       <summary>Edit fields</summary>
-      <p class="muted" id="partial-note" hidden>This page couldn't be read from your browser (the site doesn't allow cross-origin requests). Fill in the title, author and date — the site name, URL and retrieval date are pre-filled.</p>
+      <p class="muted" id="partial-note" hidden>This page couldn't be read: the site doesn't allow cross-origin requests from your browser, this site's page fetcher could not get it, and the Internet Archive has no usable snapshot. Fill in the title, author and date — the site name, URL and retrieval date are pre-filled.</p>
       <form id="fields" class="form-grid" autocomplete="off">
         <div class="half">
           <label for="f-type">Type</label>
@@ -128,6 +132,7 @@
         <div>
           <label for="f-title">Title</label>
           <input type="text" id="f-title">
+          <p class="muted">Wrap words in braces to protect their capitalisation when sentence-casing is on: <code>{BERT}</code>, <code>{Transformer}</code>.</p>
         </div>
         <div>
           <label for="f-container">Journal / proceedings / book / site name</label>
@@ -184,10 +189,10 @@
       <summary>How it works / privacy</summary>
       <ul class="muted">
         <li>The input is classified first: DOI (bare, doi.org or a publisher URL containing one), arXiv id or URL, OpenReview forum, PubMed id, ACL Anthology id, Semantic Scholar paper, ISBN, or a plain web page.</li>
-        <li>Metadata is then fetched from the matching public API: <strong>Crossref</strong> (DOIs, with <strong>DataCite</strong> as fallback), the <strong>arXiv</strong> export API, <strong>Semantic Scholar</strong> (ACL Anthology, Semantic Scholar and some publisher URLs), <strong>OpenReview</strong>, <strong>PubMed E-utilities</strong> and <strong>Open Library</strong> (ISBNs).</li>
-        <li>Plain web pages are read directly for <code>citation_*</code>, Open Graph, Dublin Core and JSON-LD metadata. Most sites do not allow cross-origin reads, so the editor opens with the site name, URL and retrieval date pre-filled for you to complete.</li>
-        <li>arXiv papers are cited as preprints; if arXiv knows a published version, a warning shows its DOI so you can cite that instead.</li>
-        <li>Requests go straight from your browser to those services — there is no server in between and nothing you look up is stored anywhere. Only your option choices are kept in your browser's local storage. The lookup is put in the page address so you can bookmark or share a result.</li>
+        <li><strong>Paper identifiers go straight from your browser to the public APIs</strong>: <strong>Crossref</strong> for DOIs (then <strong>DataCite</strong>, then doi.org's citation data), <strong>DataCite</strong> for arXiv papers (it holds every arXiv record; <strong>Semantic Scholar</strong> is the fallback), <strong>Crossref</strong> for ACL Anthology papers, <strong>OpenReview</strong>, <strong>PubMed E-utilities</strong> and <strong>Open Library</strong> (ISBNs). The “Sources tried” line under the status shows which services answered.</li>
+        <li><strong>Ordinary web pages</strong> (blog posts, docs, news) are fetched by a small stateless function on this site (<code>/api/meta</code>), because browsers cannot read most third-party pages; it returns only the page <code>&lt;head&gt;</code>, which is parsed here for <code>citation_*</code>, Open Graph, Dublin Core and JSON-LD metadata. Pages that allow cross-origin reads (e.g. PMLR) are read directly, and the <strong>Internet Archive</strong> is the fallback when a page cannot be fetched. If everything fails, the editor opens with the site name, URL and retrieval date pre-filled for you to complete.</li>
+        <li>arXiv papers are cited as preprints; when a published version is known, a warning shows its DOI so you can cite that instead. OpenReview sometimes blocks automated requests with an anti-bot challenge; paste the paper's arXiv link or BibTeX in that case.</li>
+        <li><strong>Nothing is stored.</strong> The page fetcher keeps no logs of its own and only passes the page's metadata back to your browser; everything else runs in your browser. Only your option choices are kept in your browser's local storage. The lookup is put in the page address so you can bookmark or share a result.</li>
       </ul>
     </details>
   </main>
