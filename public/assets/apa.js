@@ -627,7 +627,7 @@ function escapeHtml(s) {
 
 /** @param {string} s @returns {string} */
 function escapeMarkdown(s) {
-  return s.replace(/[\\*_`[\]<>]/g, (ch) => `\\${ch}`);
+  return s.replace(/[\\*_`<]/g, (ch) => `\\${ch}`);
 }
 
 const LATEX_ESCAPES = {
