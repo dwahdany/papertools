@@ -38,6 +38,11 @@ describe('splitCells', () => {
   test('trailing backslash at end of row is harmless', () => {
     assert.deepEqual(splitCells('| a | b\\').cells, ['a', 'b\\']);
   });
+  test('only ASCII whitespace is trimmed; NBSP and other Unicode spaces are cell content (GFM)', () => {
+    assert.deepEqual(splitCells('|  indented | x\t|').cells, ['  indented', 'x']);
+    assert.deepEqual(splitCells('| 　x | ﻿y |').cells, ['　x', '﻿y']);
+    assert.deepEqual(splitCells(' | a | b |'), { cells: [' ', 'a', 'b'], leadingPipe: false, trailingPipe: true });
+  });
 });
 
 describe('isDelimiterRow', () => {
@@ -50,6 +55,13 @@ describe('isDelimiterRow', () => {
     for (const row of ['| a | b |', '| --- | b |', '| |', '', '|:|', '| -- - |', '| --- ||']) {
       assert.equal(isDelimiterRow(row), false, JSON.stringify(row));
     }
+  });
+  test('a line starting with a list marker is a list item, not a delimiter row', () => {
+    for (const row of ['- | -', '-\t| -', '  - | - |', '* | *', '+ | -']) {
+      assert.equal(isDelimiterRow(row), false, JSON.stringify(row));
+    }
+    assert.equal(isDelimiterRow('-|-'), true);
+    assert.equal(isDelimiterRow('-| -'), true);
   });
 });
 
@@ -77,6 +89,52 @@ describe('compactRow', () => {
   });
   test('does not collapse dashes in body cells', () => {
     assert.equal(compactRow('| --- | text |'), '---|text');
+  });
+  test('the role argument restricts collapsing to the delimiter row', () => {
+    assert.equal(compactRow('| --- | --- |', undefined, { delimiter: true }), '-|-');
+    assert.equal(compactRow('| --- | --- |', undefined, { delimiter: false }), '---|---');
+    assert.equal(compactRow('| --- | --- |', undefined, {}), '---|---');
+    assert.equal(compactRow('| --- | --- |'), '-|-');
+  });
+  test('a cell ending in an unescaped backslash keeps one space before the next pipe', () => {
+    assert.equal(compactRow('| C:\\ | x |'), 'C:\\ |x');
+    assert.equal(compactRow('| a | C:\\ |', { outerPipes: 'keep' }), '|a|C:\\ |');
+    assert.equal(compactRow('| C:\\ |'), '|C:\\ |');
+    assert.equal(compactRow('| \\\\ | x |'), '\\\\|x', 'an even run of backslashes is untouched');
+    assert.equal(compactRow('| \\\\\\ | x |'), '\\\\\\ |x', 'an odd run of three is guarded');
+    assert.equal(compactRow('| a | b\\'), 'a|b\\', 'no pipe follows the last cell in strip mode');
+    for (const row of ['| C:\\ | x |', '| a | C:\\ |', '| \\\\ | x |', '| a\\ | b\\ | c\\ |']) {
+      assert.deepEqual(splitCells(compactRow(row)).cells, splitCells(row).cells, row);
+      assert.deepEqual(splitCells(compactRow(row, { outerPipes: 'keep' })).cells, splitCells(row).cells, row);
+    }
+  });
+  test('the leading pipe is kept when the first cell would start a block at column 0', () => {
+    const kept = {
+      '| > 0.05 | x |': '|> 0.05|x',
+      '| 1. First | x |': '|1. First|x',
+      '| 3) x | y |': '|3) x|y',
+      '| - removed | x |': '|- removed|x',
+      '| + added | x |': '|+ added|x',
+      '| * x | y |': '|* x|y',
+      '| ``` | x |': '|```|x',
+      '| ~~~ | x |': '|~~~|x',
+      '| # Title | b |': '|# Title|b',
+      '| <div> | b |': '|<div>|b',
+      '| > | x |': '|>|x',
+    };
+    for (const [row, expected] of Object.entries(kept)) assert.equal(compactRow(row), expected, row);
+    const stripped = {
+      '| < 0.05 | x |': '< 0.05|x',
+      '| +1 | -1 |': '+1|-1',
+      '| #tag | x |': '#tag|x',
+      '| *** | b |': '***|b',
+      '| - | - |': '-|-',
+      '| - | 3 |': '-|3',
+      '| 1.5 | 5 |': '1.5|5',
+      '| #1 | 6 |': '#1|6',
+      '| 1. | x |': '1.|x',
+    };
+    for (const [row, expected] of Object.entries(stripped)) assert.equal(compactRow(row), expected, row);
   });
   test('rows without pipes are returned trimmed', () => {
     assert.equal(compactRow('  just text  '), 'just text');
@@ -189,10 +247,75 @@ describe('compactMarkdown — edge cases', () => {
     assert.equal(out('```\n| a   | b |\n| c   | d |'), '```\n| a   | b |\n| c   | d |');
   });
 
-  test('indentation up to 3 spaces is stripped; 4+ or a tab is indented code', () => {
-    assert.equal(out('   | a   | b |\n   |-----|---|'), 'a|b\n-|-');
+  test('indentation up to 3 spaces is kept; 4+ or a tab is indented code', () => {
+    assert.equal(out('   | a   | b |\n   |-----|---|'), '   a|b\n   -|-');
+    assert.equal(out(' | a   | b |'), ' a|b');
     assert.equal(out('    | a   | b |'), '    | a   | b |');
     assert.equal(out('\t| a   | b |'), '\t| a   | b |');
+  });
+
+  test('tables nested in list items keep their indentation and stay in the item', () => {
+    assert.equal(out('- item\n  | a | b |\n  |---|---|\n  | 1 | 2 |\n- next'), '- item\n  a|b\n  -|-\n  1|2\n- next');
+    assert.equal(out('1. item\n   | a | b |\n   |---|---|\n   | 1 | 2 |'), '1. item\n   a|b\n   -|-\n   1|2');
+    assert.equal(out('>  | a | b |\n>  |---|---|'), '>  a|b\n>  -|-');
+  });
+
+  test('only the delimiter row is collapsed; body rows made of dashes are content', () => {
+    assert.equal(out('| a | b |\n|---|---|\n| --- | --- |\n| 1 | 2 |'), 'a|b\n-|-\n---|---\n1|2');
+    assert.equal(out('| a | b |\n|---|---|\n| -- | -- |\n| :-- | --: |'), 'a|b\n-|-\n--|--\n:--|--:');
+    assert.equal(out('| --- | --- |'), '---|---', 'a standalone all-dash line has no header above it');
+    assert.equal(out('a | b | c\n--- | ---'), 'a | b | c\n--- | ---');
+  });
+
+  test('a backslash-terminated cell never merges with the next cell', () => {
+    assert.equal(out('| Path | Drive |\n|---|---|\n| C:\\ | system |'), 'Path|Drive\n-|-\nC:\\ |system');
+    assert.equal(out('| a | C:\\ |\n|---|---|\n| 1 | 2 |', { outerPipes: 'keep' }), '|a|C:\\ |\n|-|-|\n|1|2|');
+    const once = out('|w|end\\|', { outerPipes: 'keep' });
+    assert.equal(once, '|w|end\\||');
+    assert.equal(out(once, { outerPipes: 'keep' }), once, 'keep mode is idempotent');
+  });
+
+  test('rows whose first cell starts a block keep the leading pipe', () => {
+    assert.equal(
+      out('| p | Result |\n|---|---|\n| > 0.05 | not significant |\n| < 0.05 | significant |'),
+      'p|Result\n-|-\n|> 0.05|not significant\n< 0.05|significant',
+    );
+    assert.equal(out('| Step | Note |\n|---|---|\n| 1. First | x |\n| - removed | y |'), 'Step|Note\n-|-\n|1. First|x\n|- removed|y');
+    assert.equal(out('| Syntax | Meaning |\n|---|---|\n| ``` | opens a fence |\n| x | y |'), 'Syntax|Meaning\n-|-\n|```|opens a fence\nx|y');
+    assert.equal(out('| # Title | b |\n|---|---|\n| 1 | 2 |'), '|# Title|b\n-|-\n1|2');
+    assert.equal(out('| <div> | b |\n|---|---|\n| 1 | 2 |'), '|<div>|b\n-|-\n1|2');
+    assert.equal(out('> | p | q |\n> |---|---|\n> | > 1 | x |'), '> p|q\n> -|-\n> |> 1|x');
+  });
+
+  test('NBSP and other Unicode spaces at cell edges and line ends are preserved', () => {
+    assert.equal(out('| a | b |\n|---|---|\n|\u00a0\u00a0indented | x |'), 'a|b\n-|-\n\u00a0\u00a0indented|x');
+    assert.equal(out('| a | b |\n|---|---|\n| \u3000x | y\ufeff |'), 'a|b\n-|-\n\u3000x|y\ufeff');
+    assert.equal(out('text\u00a0\u00a0'), 'text\u00a0\u00a0');
+    assert.equal(out('text\u00a0 \t'), 'text\u00a0');
+  });
+
+  test('trailing-space hard line breaks survive trimming', () => {
+    assert.equal(out('line one  \nline two'), 'line one  \nline two');
+    assert.equal(out('a   \nb'), 'a  \nb', 'reduced to exactly two spaces');
+    assert.equal(out('a  \n\nb'), 'a\n\nb', 'not at the end of a paragraph');
+    assert.equal(out('a  '), 'a', 'not at the end of the document');
+    assert.equal(out('> quoted   \n> more'), '> quoted  \n> more');
+    assert.equal(out('- item  \n  cont'), '- item  \n  cont');
+    assert.equal(out('a  \nb  \nc'), 'a  \nb  \nc');
+    assert.equal(out('a \t\nb'), 'a\nb', 'tabs are not a hard break');
+    assert.equal(out('```\nx  \ny\n```'), '```\nx\ny\n```', 'inside fences trailing whitespace is just trimmed');
+    assert.equal(out('a  \nb', { trimTrailingWhitespace: false }), 'a  \nb');
+    assert.equal(out('   \nb'), '\nb', 'blank lines stay blank');
+  });
+
+  test('a "- | -" delimiter candidate is a list item, so no table is created', () => {
+    const text = 'a | b\n- | -\n1 | 2';
+    assert.equal(out(text), text);
+    assert.equal(compactMarkdown(text).stats.tablesFound, 0);
+    assert.equal(out('a | b\n-\t| -\n1 | 2'), 'a | b\n-\t| -\n1 | 2');
+    assert.equal(out('> a | b\n> - | -'), '> a | b\n> - | -');
+    assert.equal(out('a | b\n-|-\n1 | 2'), 'a|b\n-|-\n1|2');
+    assert.equal(out('a | b\n-| -\n1 | 2'), 'a|b\n-|-\n1|2');
   });
 
   test('blockquoted tables keep their prefix', () => {

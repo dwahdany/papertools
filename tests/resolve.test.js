@@ -1206,7 +1206,7 @@ describe('resolveReference', () => {
     assert.match(r.warnings[2], /^Metadata read from an Internet Archive snapshot dated 2026-11-04/);
     assert.deepEqual(r.sources.map((x) => [x.name, x.status, x.detail]), [
       ['api-meta', 'failed', 'page unreachable'],
-      ['direct', 'failed', 'unreachable (blocked by CORS or offline)'],
+      ['direct', 'failed', 'unreachable (blocked by CORS, rate-limited or offline)'],
       ['wayback', 'ok', undefined],
     ]);
     assert.deepEqual(f.hosts(), ['papertools.pages.dev', 'openai.com', 'archive.org', 'web.archive.org']);
@@ -1243,7 +1243,7 @@ describe('resolveReference', () => {
       assert.equal(e.partial.identifier.kind, 'url');
       assert.deepEqual(e.partial.sources.map((x) => [x.name, x.status, x.detail]), [
         ['api-meta', 'skipped', 'no page-fetching function configured'],
-        ['direct', 'failed', 'unreachable (blocked by CORS or offline)'],
+        ['direct', 'failed', 'unreachable (blocked by CORS, rate-limited or offline)'],
         ['wayback', 'failed', 'no snapshot'],
       ]);
       assert.equal(e.partial.warnings.length, 2);

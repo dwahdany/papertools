@@ -26,6 +26,8 @@
     .row.compact label.inline:has(select) { flex-wrap: wrap; }
     .row.compact select { width: auto; max-width: 100%; padding: 0.3rem 0.4rem; font-size: 0.9rem; }
     .formats .fmt-title { font-weight: 600; font-size: 0.95rem; margin: 0.75rem 0 0.25rem; }
+    /* Heading over the output box: looks like a form label but is not one (a <label> with no control labels nothing). */
+    p.label { display: block; font-weight: 600; margin: 0.75rem 0 0.25rem; font-size: 0.95rem; }
   </style>
 </head>
 <body>
@@ -84,14 +86,15 @@
       </div>
 
       <div>
-        <label id="output-label">APA references</label>
+        <p class="label" id="output-label">APA references</p>
         <div class="row" role="group" aria-label="Copy">
           <button type="button" class="primary" id="copy-rich">Copy rich text</button>
           <button type="button" id="copy-markdown">Copy Markdown</button>
           <button type="button" id="copy-latex">Copy LaTeX</button>
           <button type="button" id="copy-plain">Copy plain text</button>
         </div>
-        <div class="output serif" id="output" aria-labelledby="output-label" aria-live="polite"></div>
+        <p class="visually-hidden" id="output-status" aria-live="polite"></p>
+        <div class="output serif" id="output" role="region" aria-labelledby="output-label"></div>
         <ul class="error" id="errors" aria-live="polite"></ul>
       </div>
     </div>
@@ -113,7 +116,7 @@
         <li><strong>Author list style:</strong> APA 7 lists up to 20 authors and, for 21 or more, the first 19 followed by “…” and the last author. Google Scholar still uses the APA 6 rule: up to seven authors are listed in full; with eight or more you get the first six, “...”, and the last. Scholar style also omits DOIs and URLs and prints “(Year, Month)” for conference papers.</li>
         <li><strong>Braces protect case.</strong> <code>{BERT}</code> or <code>{{Deep Learning}}</code> in a BibTeX title is never re-cased; the braces themselves are removed from the output. Escaped braces (<code>\{</code>, <code>\}</code>) are printed literally.</li>
         <li><strong>LaTeX is decoded</strong> to Unicode: accents such as <code>\"{o}</code>, <code>\'e</code>, <code>\c{c}</code>, <code>{\L}</code>, <code>\ss</code>; <code>--</code> and <code>---</code> to en and em dashes; <code>``quotes''</code> to typographic quotes; <code>~</code> to a non-breaking space; <code>\emph{}</code>, <code>\textit{}</code> and <code>\url{}</code> are unwrapped. The standard month macros (<code>jan</code>…<code>dec</code>) and <code>@string</code> definitions are expanded.</li>
-        <li><strong>Entry types:</strong> <code>@article</code>, <code>@inproceedings</code>/<code>@conference</code>, <code>@book</code>, <code>@incollection</code>/<code>@inbook</code>, <code>@phdthesis</code>, <code>@mastersthesis</code>, <code>@techreport</code>, <code>@misc</code> (arXiv preprints are detected from <code>eprint</code>/<code>archivePrefix</code> or an arXiv URL), <code>@online</code>, <code>@software</code>, <code>@dataset</code>, <code>@patent</code>. Unknown types are formatted generically with a warning.</li>
+        <li><strong>Entry types:</strong> <code>@article</code>, <code>@inproceedings</code>/<code>@conference</code>, <code>@book</code>, <code>@incollection</code>/<code>@inbook</code>, <code>@phdthesis</code>, <code>@mastersthesis</code>, <code>@techreport</code>, <code>@misc</code> (arXiv preprints are detected from <code>eprint</code>/<code>archivePrefix</code> or an arXiv URL), <code>@online</code>, <code>@software</code>, <code>@dataset</code>, <code>@patent</code>. Unknown types are formatted generically.</li>
         <li><strong>Sharing:</strong> “Share link” puts your BibTeX into the URL fragment (<code>#bib=…</code>). Fragments are never sent to any server, so the link is still fully private; it is only available for inputs under 8 000 characters.</li>
         <li><strong>Found a bug or a wrongly formatted reference?</strong> Please open an issue on GitHub (link in the footer) and include the BibTeX entry.</li>
       </ul>

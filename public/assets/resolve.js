@@ -1497,7 +1497,7 @@ function shortReason(err) {
   if (err.status === 403) return 'forbidden';
   if (err.status) return `HTTP ${err.status}`;
   if (err.timeout) return 'timed out';
-  if (err.networkError) return 'unreachable (blocked by CORS or offline)';
+  if (err.networkError) return 'unreachable (blocked by CORS, rate-limited or offline)';
   const m = err.message ? String(err.message) : String(err);
   return m.length > 60 ? `${m.slice(0, 57)}…` : m;
 }

@@ -4,6 +4,7 @@ import {
   parseBibtex, latexToUnicode, stripBraces, parseNames, bibtexToReference,
   referenceToBibtex, parseBibtexToReferences,
 } from '../public/assets/bibtex.js';
+import { formatApa } from '../public/assets/apa.js';
 
 // ---------------------------------------------------------------------------
 // Realistic samples (one per common source)
@@ -288,6 +289,15 @@ const HANDWRITTEN = `% My thesis references
   publisher = {Zenodo},
   url = {https://github.com/pytorch/pytorch},
   year = {2019}
+}
+
+@unpublished{smith2021manuscript,
+  author = {Smith, {John and Jane} and {Barnes and Noble}, Mary},
+  title = {A Manuscript on Zero-Shot Learning with GPT-4},
+  note = {Unpublished manuscript},
+  year = {2021},
+  month = {June 12},
+  language = {english}
 }`;
 
 const ALL_SAMPLES = [ACL, DBLP, DBLP_CORR, SCHOLAR_PMLR, SCHOLAR_ARXIV, SCHOLAR_JOURNAL, ARXIV_EXPORT,
@@ -463,6 +473,56 @@ More trailing junk } } {`;
     assert.equal(errors[0].line, 1);
   });
 
+  test('error recovery is linear: thousands of unbalanced entries parse quickly', () => {
+    for (const unit of ['@article{k, title={x\n', '@article{k, title="x\n']) {
+      const text = unit.repeat(20000);
+      const t0 = Date.now();
+      const { entries, errors } = parseBibtex(text);
+      const elapsed = Date.now() - t0;
+      assert.equal(entries.length, 0);
+      assert.equal(errors.length, 20000);
+      assert.ok(elapsed < 1500, `${JSON.stringify(unit)} x 20000 took ${elapsed}ms`);
+    }
+    // unterminated @comment bodies as well
+    const t1 = Date.now();
+    const res = parseBibtex('@comment{x {y}\n'.repeat(20000) + '@comment{open\n'.repeat(5000));
+    assert.ok(Date.now() - t1 < 1500);
+    assert.equal(res.errors.length, 5000);
+  });
+
+  test('entries after a recovered error still parse exactly as before (brace-match table path)', () => {
+    const tail = [
+      '@comment{This whole block is {ignored} by the parser}',
+      '@string{j = "Journal of {Things}"}',
+      '@article{good, title = {A {B {C}} D}, journal = j, note = "Quote with {a "quoted" group} inside", year = 2001}',
+      '@misc{good2, title = "Plain quoted", howpublished = {\\url{https://x.y/{a}}}}',
+      '@article{bad2, title = {also {broken, year = {2002}}',
+      '@misc{good3, title = {Last}}',
+    ].join('\n');
+    const withError = parseBibtex('@article{broken, title = {Unbalanced {brace,\n year = {2000}\n}\n' + tail);
+    const clean = parseBibtex(tail);
+    assert.equal(withError.errors.length, 2);
+    assert.equal(clean.errors.length, 1);
+    const strip = (es) => es.map(({ type, key, fields }) => ({ type, key, fields }));
+    assert.deepEqual(strip(withError.entries), strip(clean.entries));
+    assert.deepEqual(withError.entries.map((e) => e.key), ['good', 'good2', 'good3']);
+    assert.equal(withError.entries[0].fields.journal, 'Journal of {Things}');
+    assert.equal(withError.entries[0].fields.note, 'Quote with {a "quoted" group} inside');
+  });
+
+  test('a braced value containing a line-start "@" still parses', () => {
+    const text = '@article{k, title={T},\n abstract={line one\n@handle said so\n  @gmail.com},\n year={2020}}\n@article{j, title={U}}';
+    const { entries, errors } = parseBibtex(text);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(entries.map((e) => e.key), ['k', 'j']);
+    assert.equal(entries[0].fields.abstract, 'line one\n@handle said so\n  @gmail.com');
+    // and the same after an earlier error has built the brace-match table
+    const after = parseBibtex('@misc{bad, title={oops\n}\n' + text);
+    assert.equal(after.errors.length, 1);
+    assert.deepEqual(after.entries.map((e) => e.key), ['k', 'j']);
+    assert.equal(after.entries[0].fields.abstract, 'line one\n@handle said so\n  @gmail.com');
+  });
+
   test('non-string input does not throw', () => {
     assert.deepEqual(parseBibtex(null), { entries: [], errors: [] });
     assert.deepEqual(parseBibtex(undefined), { entries: [], errors: [] });
@@ -473,7 +533,7 @@ More trailing junk } } {`;
   test('all realistic samples parse without errors', () => {
     const { entries, errors } = parseBibtex(ALL_SAMPLES);
     assert.deepEqual(errors, []);
-    assert.equal(entries.length, 22);
+    assert.equal(entries.length, 23);
   });
 
   test('very long input parses in linear-ish time', () => {
@@ -551,6 +611,17 @@ describe('latexToUnicode', () => {
     assert.equal(latexToUnicode(null), '');
     assert.equal(latexToUnicode(undefined), '');
     assert.equal(latexToUnicode(42), '42');
+  });
+
+  test('HTML entities left by exporters (Crossref) are decoded; unknown entities kept', () => {
+    assert.equal(latexToUnicode('Knowledge Discovery &amp; Data Mining'), 'Knowledge Discovery & Data Mining');
+    // entities are decoded before the LaTeX pass, so &apos; gets the same quote treatment as a literal '
+    assert.equal(latexToUnicode('&lt;b&gt; &quot;q&quot; &apos;a&apos; x&nbsp;y'), '<b> "q" ’a’ x y');
+    assert.equal(latexToUnicode('&#233;t&#xE9; &#8212;'), 'été —');
+    assert.equal(latexToUnicode('&AMP; &#X41;'), '& A');
+    assert.equal(latexToUnicode('R&D and &foo; and & alone'), 'R&D and &foo; and & alone');
+    assert.equal(latexToUnicode('A \\& B &amp; C'), 'A & B & C');
+    assert.equal(latexToUnicode('https://x.y/?a=1&amp;b=2'), 'https://x.y/?a=1&amp;b=2'); // URLs untouched
   });
 
   test('malformed input does not throw', () => {
@@ -900,6 +971,65 @@ describe('bibtexToReference', () => {
     assert.equal(sw.version, '2.1.0');
     assert.equal(sw.publisher, 'Zenodo');
     assert.equal(sw.url, 'https://github.com/pytorch/pytorch');
+
+    const man = byId.smith2021manuscript;
+    assert.equal(man.type, 'manuscript');
+    assert.equal(man.genre, undefined);
+    assert.equal(man.note, undefined);
+    assert.deepEqual(man.author, [{ family: 'Smith', given: 'John and Jane' }, { family: 'Barnes and Noble', given: 'Mary' }]);
+    assert.deepEqual([man.year, man.month, man.day], [2021, 6, 12]);
+    assert.equal(man.language, 'english');
+    const apa = formatApa(man).plain;
+    assert.ok(apa.startsWith('Smith, J.') && apa.includes('Barnes and Noble, M. (2021).'), apa);
+    assert.ok(apa.endsWith('A manuscript on zero-shot learning with GPT-4 [Unpublished manuscript].'), apa);
+  });
+
+  test('@unpublished -> manuscript: note consumed, non-default phrase -> genre, arXiv/software notes still win', () => {
+    const u = ref('@unpublished{u, author={Smith, John}, title={A manuscript}, note={Unpublished manuscript}, year={2021}}');
+    assert.equal(u.type, 'manuscript');
+    assert.equal(u.note, undefined);
+    assert.equal(u.genre, undefined);
+    assert.equal(formatApa(u).plain, 'Smith, J. (2021). A manuscript [Unpublished manuscript].');
+
+    const prep = ref('@unpublished{u, title={T}, note={Manuscript in preparation.}}');
+    assert.equal(prep.type, 'manuscript');
+    assert.equal(prep.genre, 'Manuscript in preparation');
+    assert.equal(prep.note, undefined);
+    assert.equal(ref('@unpublished{u, title={T}, note={[Manuscript submitted for publication]}}').genre, 'Manuscript submitted for publication');
+    assert.equal(ref('@unpublished{u, title={T}, note={submitted for publication}}').genre, 'Submitted for publication');
+
+    const typed = ref('@unpublished{u, title={T}, type={Working paper}, note={Unpublished manuscript}}');
+    assert.equal(typed.genre, 'Working paper');
+    assert.equal(typed.note, undefined);
+
+    // a note that is not a status phrase stays a note; no type, no genre
+    const other = ref('@unpublished{u, title={T}, note={Presented at the workshop}}');
+    assert.equal(other.type, 'manuscript');
+    assert.equal(other.note, 'Presented at the workshop');
+    assert.equal(other.genre, undefined);
+
+    // the status phrase also promotes @misc, but is kept as a note on other types
+    assert.equal(ref('@misc{u, title={T}, note={Unpublished manuscript}}').type, 'manuscript');
+    const art = ref('@article{a, title={T}, journal={J}, note={Unpublished manuscript}}');
+    assert.equal(art.type, 'article-journal');
+    assert.equal(art.note, 'Unpublished manuscript');
+
+    // precedence unchanged: arXiv detection -> preprint, software marker -> software
+    assert.equal(ref('@unpublished{x, title={T}, note={Unpublished manuscript}, eprint={2101.00001}, archivePrefix={arXiv}}').type, 'preprint');
+    assert.equal(ref('@unpublished{x, title={T}, note={Available at https://arxiv.org/pdf/2101.00003v1.pdf}}').type, 'preprint');
+    assert.equal(ref('@unpublished{x, title={T}, note={Computer software}}').type, 'software');
+  });
+
+  test('Crossref x-bibtex: &amp; in booktitle decodes to & and is escaped once in HTML / LaTeX output', () => {
+    const r = ref('@inproceedings{b, title={X}, booktitle={Proceedings of the 25th ACM SIGKDD International Conference on Knowledge Discovery &amp; Data Mining}, author={A, B}, year={2019}}');
+    assert.ok(r.containerTitle.includes('Discovery & Data Mining'), r.containerTitle);
+    const out = formatApa(r);
+    assert.ok(out.plain.includes('knowledge discovery & data mining'), out.plain);
+    assert.equal((out.html.match(/&amp;/g) || []).length, 1);
+    assert.doesNotMatch(out.html, /&amp;amp;/);
+    assert.ok(out.latex.includes('discovery \\& data mining'), out.latex);
+    assert.doesNotMatch(out.latex, /\\&amp;/);
+    assert.deepEqual(parseNames('Johnson &amp; Johnson, Inc.'), [{ family: 'Johnson & Johnson', given: 'Inc.' }]);
   });
 
   test('month variants', () => {
@@ -1117,6 +1247,94 @@ describe('referenceToBibtex', () => {
     assert.match(out, /url = \{https:\/\/x\.y\/a_b\?c=d&e=f#frag\}/);
   });
 
+  test('title protection: Title-Case compounds are left alone, acronym parts protect the token', () => {
+    const plain = referenceToBibtex({ type: 'generic', author: [], title: 'Zero-Shot Transfer for Multi-Domain Encoder/Decoder Coarse-to-Fine Image+Text Models' });
+    assert.match(plain, /title = \{Zero-Shot Transfer for Multi-Domain Encoder\/Decoder Coarse-to-Fine Image\+Text Models\}/);
+    const acr = referenceToBibtex({ type: 'generic', author: [], title: "GPT-4 and ReLU with BERT-base, AI/ML, O'Reilly and (LLMs)." });
+    assert.match(acr, /title = \{\{GPT-4\} and \{ReLU\} with \{BERT-base\}, \{AI\/ML\}, \{O'Reilly\} and \(\{LLMs\}\)\.\}/);
+  });
+
+  test('title protection never inserts a brace after a backslash (math left by latexToUnicode)', () => {
+    const titles = [
+      '\\pi-Tuning: Transferring Models',
+      'Adaptive Minimax Regression Estimation over Sparse \\ell_q-Hulls',
+      '$\\pi$-Tuning: X',
+      '(\\alpha-Divergences) and \\textsc{Foo}-Bar',
+    ];
+    for (const title of titles) {
+      const r = { type: 'article-journal', author: [{ family: 'Wu', given: 'C.' }], title, containerTitle: 'Journal of Machine Learning Research', volume: '15', issue: '50', page: '1675-1711', year: 2014, url: 'https://jmlr.org/x' };
+      const out = referenceToBibtex(r);
+      const titleLine = out.split('\n').find((l) => l.startsWith('  title = '));
+      assert.doesNotMatch(titleLine, /\\\{/, titleLine);
+      const opens = (titleLine.match(/\{/g) || []).length;
+      const closes = (titleLine.match(/\}/g) || []).length;
+      assert.equal(opens, closes, titleLine);
+      const parsed = parseBibtex(out);
+      assert.deepEqual(parsed.errors, [], title);
+      assert.equal(parsed.entries.length, 1);
+      const back = bibtexToReference(parsed.entries[0]);
+      assert.equal(back.containerTitle, 'Journal of Machine Learning Research', title);
+      assert.equal(back.volume, '15');
+      assert.equal(back.issue, '50');
+      assert.equal(back.page, '1675-1711');
+      assert.equal(back.year, 2014);
+      assert.equal(back.url, 'https://jmlr.org/x');
+    }
+  });
+
+  test('escaping of $ and a literal ~ (nbsp still becomes ~); pre-escaped \\$ not doubled', () => {
+    const out = referenceToBibtex({ type: 'article-journal', author: [{ family: 'Cee', given: 'A. B.' }], title: 'Cost: $100 million ~ 10% stake', publisher: 'A $ B', year: 2000 });
+    assert.match(out, /title = \{Cost: \\\$100 million \\textasciitilde\{\} 10\\% stake\}/);
+    assert.match(out, /publisher = \{A \\\$ B\}/);
+    const parsed = parseBibtexToReferences(out);
+    assert.deepEqual(parsed.errors, []);
+    assert.equal(parsed.references[0].title, 'Cost: $100 million ~ 10% stake');
+    assert.match(referenceToBibtex(ref('@article{x, title={Cost: \\$100 million}, year={2000}}')), /title = \{Cost: \\\$100 million\}/);
+    assert.match(referenceToBibtex({ type: 'generic', title: 'Section\u00A02' }), /title = \{Section~2\}/);
+  });
+
+  test('name parts containing " and " or a comma are braced so they re-parse as one person', () => {
+    const names = parseNames('Smith, {John and Jane} and {Doe and Roe}, Jane and {van den Berg and Sons}, Pieter and Grand, {Jr., III}, X');
+    assert.deepEqual(names, [
+      { family: 'Smith', given: 'John and Jane' },
+      { family: 'Doe and Roe', given: 'Jane' },
+      { family: 'van den Berg and Sons', given: 'Pieter' },
+      { family: 'Grand', suffix: 'Jr., III', given: 'X' },
+    ]);
+    const out = referenceToBibtex({ type: 'generic', title: 'T', author: names });
+    assert.match(out, /author = \{Smith, \{John and Jane\} and \{Doe and Roe\}, Jane and \{van den Berg and Sons\}, Pieter and Grand, \{Jr\., III\}, X\}/);
+    const back = parseBibtexToReferences(out);
+    assert.deepEqual(back.errors, []);
+    assert.deepEqual(back.references[0].author, names);
+    // "Anderson" / "Sandy" are not " and "
+    assert.match(referenceToBibtex({ type: 'generic', title: 'T', author: [{ family: 'Anderson', given: 'Sandy' }] }), /author = \{Anderson, Sandy\}/);
+  });
+
+  test('day and language are emitted and read back', () => {
+    const out = referenceToBibtex({ type: 'webpage', title: 'T', url: 'https://x.y', year: 2023, month: 3, day: 27, language: 'en', accessed: '2023-11-02' });
+    assert.match(out, /year = \{2023\},\n  month = mar,\n  day = \{27\},/);
+    assert.match(out, /language = \{en\}/);
+    const back = parseBibtexToReferences(out).references[0];
+    assert.deepEqual([back.year, back.month, back.day, back.language], [2023, 3, 27, 'en']);
+    assert.equal(formatApa(back).plain, formatApa({ type: 'webpage', title: 'T', url: 'https://x.y', year: 2023, month: 3, day: 27, language: 'en', accessed: '2023-11-02' }).plain);
+    // no day without a month; out-of-range day dropped
+    assert.doesNotMatch(referenceToBibtex({ type: 'webpage', title: 'T', year: 2023, day: 27 }), /day =/);
+    assert.doesNotMatch(referenceToBibtex({ type: 'webpage', title: 'T', year: 2023, month: 3, day: 32 }), /day =/);
+  });
+
+  test('manuscript -> @unpublished: default genre as note, other genre as type, note kept', () => {
+    const def = referenceToBibtex({ type: 'manuscript', author: [{ family: 'Smith', given: 'John' }], title: 'A manuscript', year: 2021 });
+    assert.match(def, /^@unpublished\{smith2021manuscript,/);
+    assert.match(def, /note = \{Unpublished manuscript\}/);
+    assert.doesNotMatch(def, /type =/);
+    const prep = referenceToBibtex({ type: 'manuscript', title: 'T', genre: 'Manuscript in preparation' });
+    assert.match(prep, /type = \{Manuscript in preparation\}/);
+    assert.doesNotMatch(prep, /note =/);
+    const noted = referenceToBibtex({ type: 'manuscript', title: 'T', genre: 'Working paper', note: 'Draft of May 2020' });
+    assert.match(noted, /type = \{Working paper\}/);
+    assert.match(noted, /note = \{Draft of May 2020\}/);
+  });
+
   test('name formatting: particle, suffix, literal, others, lowercase family protected, given-only', () => {
     const out = referenceToBibtex({
       type: 'book', year: 2001, title: 'T',
@@ -1211,8 +1429,8 @@ describe('referenceToBibtex', () => {
 // ---------------------------------------------------------------------------
 
 const STABLE_KEYS = ['type', 'author', 'editor', 'containerTitle', 'collectionTitle', 'volume', 'issue', 'page',
-  'publisher', 'publisherPlace', 'institution', 'edition', 'number', 'genre', 'year', 'month', 'doi', 'url',
-  'accessed', 'archive', 'archiveId', 'note', 'version'];
+  'publisher', 'publisherPlace', 'institution', 'edition', 'number', 'genre', 'year', 'month', 'day', 'doi', 'url',
+  'accessed', 'archive', 'archiveId', 'note', 'version', 'language'];
 
 function stableSubset(r) {
   const out = {};
@@ -1240,5 +1458,35 @@ describe('round trip', () => {
   test('generated keys look like vaswani2017attention', () => {
     const { references } = parseBibtexToReferences(DBLP);
     assert.match(referenceToBibtex(references[0]), /^@inproceedings\{vaswani2017attention,/);
+  });
+
+  test('APA text survives a bibtex round trip for hyphenated Title-Case titles and acronyms', () => {
+    const titles = [
+      'Zero-Shot Transfer Learning with Synthesized Data for Multi-Domain Dialogue State Tracking',
+      'Coach: A Coarse-to-Fine Approach for Cross-Domain Slot Filling',
+      'GPT-4 and ReLU in Encoder/Decoder Models for AI/ML with BERT-base',
+    ];
+    for (const title of titles) {
+      const r = { type: 'paper-conference', author: [{ family: 'Liu', given: 'Zihan' }], title, containerTitle: 'Proceedings of ACL', page: '1-10', year: 2020 };
+      const back = parseBibtexToReferences(referenceToBibtex(r)).references[0];
+      assert.equal(formatApa(back).plain, formatApa(r).plain, title);
+    }
+  });
+
+  test('manuscript, day and language survive a round trip', () => {
+    const r = { type: 'manuscript', author: [{ family: 'Smith', given: 'John' }], title: 'A manuscript', year: 2021, month: 6, day: 12, language: 'english' };
+    const bib = referenceToBibtex(r);
+    assert.match(bib, /^@unpublished\{/);
+    assert.match(bib, /note = \{Unpublished manuscript\}/);
+    const back = parseBibtexToReferences(bib);
+    assert.deepEqual(back.errors, []);
+    assert.equal(back.references[0].type, 'manuscript');
+    assert.equal(back.references[0].note, undefined);
+    assert.deepEqual([back.references[0].month, back.references[0].day, back.references[0].language], [6, 12, 'english']);
+    assert.ok(formatApa(back.references[0]).plain.endsWith('[Unpublished manuscript].'));
+    assert.equal(formatApa(back.references[0]).plain, formatApa(r).plain);
+    const genre = { ...r, genre: 'Manuscript in preparation' };
+    assert.equal(parseBibtexToReferences(referenceToBibtex(genre)).references[0].genre, 'Manuscript in preparation');
+    assert.equal(parseBibtexToReferences(referenceToBibtex(genre)).references[0].note, undefined);
   });
 });

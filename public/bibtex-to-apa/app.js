@@ -10,6 +10,7 @@ import { $, toast, copyToClipboard, escapeHtml, persist, debounce } from '../ass
 const input = $('#input');
 const output = $('#output');
 const errorList = $('#errors');
+const outputStatus = $('#output-status');
 const fmtMarkdown = $('#fmt-markdown');
 const fmtLatex = $('#fmt-latex');
 const fmtPlain = $('#fmt-plain');
@@ -35,7 +36,7 @@ const EXAMPLE = `@article{vaswani2017attention,
 @inproceedings{devlin2019bert,
   title={{BERT}: Pre-training of Deep Bidirectional Transformers for Language Understanding},
   author={Devlin, Jacob and Chang, Ming-Wei and Lee, Kenton and Toutanova, Kristina},
-  booktitle={Proceedings of the 2019 Conference of the North American Chapter of the Association for Computational Linguistics},
+  booktitle={Proceedings of the 2019 Conference of the {North American} Chapter of the {Association for Computational Linguistics}},
   pages={4171--4186},
   month=jun,
   year={2019},
@@ -62,6 +63,14 @@ const EXAMPLE = `@article{vaswani2017attention,
 
 /** @type {Entry[]} The entries currently shown, in display order. */
 let entries = [];
+
+/**
+ * The HTML last written into #output. render() skips the DOM write when the
+ * new markup is identical (e.g. the user typed a comment or whitespace), so
+ * the reference list is not torn down and rebuilt on every debounced input.
+ * @type {string|null}
+ */
+let lastOutputHtml = null;
 
 /** Read the option controls into formatApa options. */
 function currentOptions() {
@@ -140,11 +149,28 @@ function htmlFor(list) {
   return list.map((e) => `<p>${e.result.html}</p>`).join('\n');
 }
 
+/**
+ * Announce how many references are shown via the visually-hidden live status
+ * line. #output itself is not a live region: re-announcing the whole list on
+ * every edit would read hundreds of entries aloud, so only this short summary
+ * is announced, and only when it changes.
+ * @param {number} count
+ */
+function renderStatus(count) {
+  const text = count === 0 ? 'No references' : `${count} reference${count === 1 ? '' : 's'}`;
+  if (outputStatus.textContent !== text) outputStatus.textContent = text;
+}
+
 /** Render the current `entries` into the output box and the Formats section. */
 function render() {
-  output.innerHTML = entries.length
+  const html = entries.length
     ? entries.map(renderEntry).join('')
     : `<p class="placeholder">${escapeHtml(PLACEHOLDER)}</p>`;
+  if (html !== lastOutputHtml) {
+    output.innerHTML = html;
+    lastOutputHtml = html;
+  }
+  renderStatus(entries.length);
   renderFormats();
 }
 

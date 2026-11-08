@@ -14,7 +14,7 @@ Small tools for academic writing. No build step: plain HTML and ES modules, depl
 npm test          # unit tests (Node ≥ 20, no dependencies)
 LIVE=1 node --test tests/live-resolve.test.js   # resolver checks against the real APIs (skipped without LIVE=1)
 npm run serve     # serve ./public on http://localhost:8000 (static only, no /api/meta)
-npx wrangler pages dev public   # full local preview including the Pages Function
+npx wrangler pages dev public   # full local preview including the Pages Function (or: npx wrangler dev, Workers mode)
 ```
 
 Behind a corporate proxy, Node's built-in `fetch` needs `NODE_USE_ENV_PROXY=1` (Node ≥ 22.21) for the live tests.
@@ -34,7 +34,7 @@ The chains below follow what the public APIs actually allow from a browser (prob
 | ISBN | Open Library. |
 | Any other URL | `/api/meta?url=…` (this site's Pages Function returns the page `<head>`) → direct `fetch` (works on CORS-enabled sites such as PMLR) → Wayback Machine (`archive.org/wayback/available`, then the raw `web.archive.org/web/<ts>id_/<url>` snapshot, with a warning naming the snapshot date) → URL-only partial reference for the editor. A `citation_doi` / `citation_arxiv_id` in the page triggers the richer chain. |
 
-Nothing is stored anywhere: `/api/meta` is stateless and only relays the page head.
+Nothing is stored anywhere: `/api/meta` is stateless and only relays the page head. Because it is reachable from any origin it is deliberately narrow: only public http(s) hosts (re-checked on every redirect hop, at most five), one 10 s deadline covering the body read, at most 512 KiB, only `text/html` / `application/xhtml+xml` responses, decoded with the page's declared charset; a document without head metadata is answered with HTTP 422 instead of being echoed (400 bad input, 415 not HTML, 502 upstream failure).
 
 ## Deploying to Cloudflare Pages
 
@@ -45,7 +45,11 @@ Create a Pages project from this repository with:
 
 The `functions/` directory is picked up automatically and becomes `/api/meta`.
 
-`wrangler.toml` already points `pages_build_output_dir` at `public`, so `npx wrangler pages deploy` also works.
+`npx wrangler pages deploy public` deploys the same thing from the command line (wrangler ignores the Workers-only settings in `wrangler.toml` for Pages commands).
+
+### Alternatively: Cloudflare Workers with static assets
+
+`wrangler.toml` is a Workers configuration: `src/worker.js` serves `public/` as static assets and routes `/api/meta` to the same handler (`handleMeta` in `functions/api/meta.js`). `npx wrangler deploy` publishes it as a Worker; `npx wrangler dev` previews it locally.
 
 ## Layout
 
@@ -63,6 +67,8 @@ public/                 the site (deploy this directory)
     compact.js          Markdown table compaction
     ui.js, style.css    shared UI helpers and styles
 functions/api/meta.js   Pages Function: fetches a web page server-side and returns its <head>
+src/worker.js           Workers entry point (static assets + /api/meta) for `wrangler deploy`
+wrangler.toml           Workers configuration (ignored by `wrangler pages …`)
 tests/                  node --test unit tests (fixtures/ holds real API bodies); live-resolve.test.js needs LIVE=1
 ```
 

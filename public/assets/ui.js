@@ -19,7 +19,9 @@ export function toast(message, ms = 1600) {
  * Copy text to the clipboard. If `html` is given, both a text/html and a
  * text/plain flavour are written so rich-text editors (Word, Google Docs)
  * keep italics while plain editors get plain text.
- * Falls back to execCommand for older browsers / insecure contexts.
+ * Falls back to execCommand for older browsers / insecure contexts; that path
+ * has to focus a temporary textarea, so it restores focus to the element that
+ * was active (normally the Copy button) afterwards.
  * @returns {Promise<boolean>} true on success
  */
 export async function copyToClipboard(text, html) {
@@ -39,6 +41,7 @@ export async function copyToClipboard(text, html) {
   } catch (_) {
     // fall through to legacy path
   }
+  const prev = document.activeElement;
   try {
     const ta = document.createElement('textarea');
     ta.value = text;
@@ -46,12 +49,18 @@ export async function copyToClipboard(text, html) {
     ta.style.position = 'fixed';
     ta.style.left = '-9999px';
     document.body.appendChild(ta);
+    ta.focus({ preventScroll: true });
     ta.select();
     const ok = document.execCommand('copy');
     document.body.removeChild(ta);
     return ok;
   } catch (_) {
     return false;
+  } finally {
+    // Removing the focused textarea drops focus on <body>; put it back where it was.
+    if (prev && prev !== document.body && typeof prev.focus === 'function' && document.activeElement !== prev) {
+      try { prev.focus({ preventScroll: true }); } catch (_) { /* ignore */ }
+    }
   }
 }
 

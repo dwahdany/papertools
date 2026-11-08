@@ -60,11 +60,11 @@ ViT-B/16|86M|81.8"></textarea>
     <details>
       <summary>How it works</summary>
       <ul class="muted">
-        <li>Each table row is split into cells on pipes, every cell is trimmed, and cells are re-joined with a bare <code>|</code>. By default the outer pipes are dropped: <code>| a | b |</code> becomes <code>a|b</code>, which GitHub-flavoured Markdown renders identically.</li>
-        <li>Separator rows keep their alignment but lose the padding dashes: <code>|:-----|----:|</code> becomes <code>:-|-:</code>.</li>
-        <li>Escaped pipes (<code>\|</code>) and pipes inside <code>`code spans`</code> are never treated as cell borders, and fenced <code>```</code> / <code>~~~</code> code blocks are left untouched.</li>
-        <li>Tables are detected the GFM way (a header row followed by a delimiter row), including inside blockquotes and with up to three spaces of indentation. Lines that merely contain a pipe in prose are left alone; single-column tables and empty edge cells keep their pipes so the table stays a table.</li>
-        <li>Everything else — headings, paragraphs, lists, code — passes through unchanged (trailing whitespace is trimmed if that option is on). Line endings are normalised to <code>\n</code>.</li>
+        <li>Each table row is split into cells on pipes, every cell is trimmed of spaces and tabs (non-breaking spaces are content, as in GFM), and cells are re-joined with a bare <code>|</code>. By default the outer pipes are dropped: <code>| a | b |</code> becomes <code>a|b</code>, which GitHub-flavoured Markdown renders identically.</li>
+        <li>Separator rows keep their alignment but lose the padding dashes: <code>|:-----|----:|</code> becomes <code>:-|-:</code>. Only the real separator row is collapsed; a body row of dashes is content and stays as it is.</li>
+        <li>Escaped pipes (<code>\|</code>) and pipes inside <code>`code spans`</code> are never treated as cell borders, and fenced <code>```</code> / <code>~~~</code> code blocks are left untouched. A cell ending in a backslash (<code>C:\</code>) keeps one space before the next pipe so it does not turn into an escaped pipe.</li>
+        <li>Tables are detected the GFM way (a header row followed by a delimiter row), including inside blockquotes and list items, whose prefix and indentation are kept. Lines that merely contain a pipe in prose are left alone; single-column tables, empty edge cells and rows whose first cell looks like a heading, quote, list item or fence (<code>&gt; 0.05</code>, <code>1. First</code>) keep their pipes so the table stays a table.</li>
+        <li>Everything else — headings, paragraphs, lists, code — passes through unchanged. If the trim option is on, trailing whitespace is removed, but a two-space hard line break at the end of a line is kept. Line endings are normalised to <code>\n</code>.</li>
       </ul>
       <p class="muted">Everything runs locally in your browser: nothing you paste leaves this page. Options are remembered in your browser's local storage.</p>
     </details>
