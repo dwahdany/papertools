@@ -1,0 +1,11 @@
+{
+  "paperId": "0123456789abcdef0123456789abcdef01234567",
+  "externalIds": { "ArXiv": "2401.00001", "DOI": "10.48550/arXiv.2401.00001", "CorpusId": 999999 },
+  "title": "A Preprint That Was Never Published",
+  "venue": "arXiv.org",
+  "publicationVenue": null,
+  "year": 2024,
+  "journal": { "name": "ArXiv", "volume": "abs/2401.00001" },
+  "publicationTypes": null,
+  "authors": [{ "authorId": "1", "name": "Ada Lovelace" }, { "authorId": "2", "name": "OpenAI" }]
+}

@@ -1,0 +1,26 @@
+{
+  "notes": [
+    {
+      "id": "abcSubmit24",
+      "original": "origabc",
+      "forum": "abcSubmit24",
+      "replyto": null,
+      "invitation": "ICLR.cc/2024/Conference/-/Blind_Submission",
+      "signatures": ["ICLR.cc/2024/Conference"],
+      "readers": ["everyone"],
+      "cdate": 1695600000000,
+      "tcdate": 1695600000000,
+      "tmdate": 1700000000000,
+      "content": {
+        "title": "Towards Something Ambitious",
+        "authors": ["Ada Lovelace", "Charles Babbage"],
+        "authorids": ["~Ada_Lovelace1", "~Charles_Babbage1"],
+        "abstract": "We propose an analytical engine.",
+        "venue": "Submitted to ICLR 2024",
+        "venueid": "ICLR.cc/2024/Conference/Submission",
+        "keywords": ["engines"]
+      }
+    }
+  ],
+  "count": 1
+}

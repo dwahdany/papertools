@@ -56,6 +56,7 @@ h1 { font-size: 1.6rem; margin: 0 0 0.25rem; }
 h2 { font-size: 1.15rem; margin: 1.5rem 0 0.5rem; }
 p.lead { color: var(--fg-muted); margin: 0 0 1.25rem; }
 .grid { display: grid; gap: 1rem; grid-template-columns: 1fr; }
+.grid > * { min-width: 0; } /* long unbreakable content must not widen a column past the viewport */
 @media (min-width: 900px) { .grid.two { grid-template-columns: 1fr 1fr; } }
 .card {
   border: 1px solid var(--border); border-radius: var(--radius);

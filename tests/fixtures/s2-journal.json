@@ -1,0 +1,15 @@
+{
+  "paperId": "a4cec122a08216fe8a3bc19b22e78fbaea096256",
+  "externalIds": { "MAG": "1959608418", "DOI": "10.1038/nature14539", "PubMed": "26017442", "CorpusId": 3074096 },
+  "title": "Deep Learning",
+  "venue": "Nature",
+  "publicationVenue": { "id": "a0c7ec36-7dfd-4f6d-9d4a-2b0f0bcd8ec5", "name": "Nature", "type": "journal", "issn": "0028-0836" },
+  "year": 2015,
+  "journal": { "name": "Nature", "volume": "521", "pages": "436-444" },
+  "publicationTypes": ["JournalArticle", "Review"],
+  "authors": [
+    { "authorId": "1688882", "name": "Yann LeCun" },
+    { "authorId": "1751762", "name": "Yoshua Bengio" },
+    { "authorId": "1695689", "name": "Geoffrey E. Hinton" }
+  ]
+}

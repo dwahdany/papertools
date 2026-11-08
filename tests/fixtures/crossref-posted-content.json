@@ -1,0 +1,31 @@
+{
+  "status": "ok",
+  "message-type": "work",
+  "message-version": "1.0.0",
+  "message": {
+    "institution": [{ "name": "bioRxiv" }],
+    "posted": { "date-parts": [[2020, 1, 3]] },
+    "group-title": "Neuroscience",
+    "reference-count": 42,
+    "publisher": "Cold Spring Harbor Laboratory",
+    "content-domain": { "domain": [], "crossmark-restriction": false },
+    "accepted": { "date-parts": [[2020, 1, 3]] },
+    "abstract": "<jats:title>Abstract</jats:title><jats:p>We study things.</jats:p>",
+    "DOI": "10.1101/2020.01.01.123456",
+    "type": "posted-content",
+    "created": { "date-parts": [[2020, 1, 3]], "date-time": "2020-01-03T20:00:00Z", "timestamp": 1578081600000 },
+    "source": "Crossref",
+    "title": ["A <i>very</i> important preprint about   neurons"],
+    "prefix": "10.1101",
+    "author": [
+      { "given": "Jane Q.", "family": "Researcher", "sequence": "first", "affiliation": [] },
+      { "given": "Laurens", "family": "van der Maaten", "sequence": "additional", "affiliation": [] }
+    ],
+    "member": "246",
+    "deposited": { "date-parts": [[2020, 1, 4]] },
+    "issued": { "date-parts": [[2020, 1, 3]] },
+    "URL": "https://doi.org/10.1101/2020.01.01.123456",
+    "subtype": "preprint",
+    "published": { "date-parts": [[2020, 1, 3]] }
+  }
+}

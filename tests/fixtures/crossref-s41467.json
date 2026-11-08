@@ -1,0 +1,29 @@
+{
+  "status": "ok",
+  "message-type": "work",
+  "message-version": "1.0.0",
+  "message": {
+    "publisher": "Springer Science and Business Media LLC",
+    "issue": "1",
+    "DOI": "10.1038/s41467-019-11786-6",
+    "type": "journal-article",
+    "created": { "date-parts": [[2019, 8, 27]] },
+    "source": "Crossref",
+    "title": ["An illustrative article about deep learning in medicine"],
+    "prefix": "10.1038",
+    "volume": "10",
+    "author": [
+      { "given": "Ashish", "family": "Vaswani", "sequence": "first", "affiliation": [] },
+      { "given": "Mary W.", "family": "Smith", "sequence": "additional", "affiliation": [] },
+      { "given": "José M.", "family": "de la Torre", "sequence": "additional", "affiliation": [] },
+      { "name": "The Example Consortium", "sequence": "additional", "affiliation": [] }
+    ],
+    "member": "297",
+    "published-online": { "date-parts": [[2019, 8, 27]] },
+    "container-title": ["Nature Communications"],
+    "article-number": "3859",
+    "issued": { "date-parts": [[2019, 8, 27]] },
+    "URL": "https://doi.org/10.1038/s41467-019-11786-6",
+    "ISSN": ["2041-1723"]
+  }
+}

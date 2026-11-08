@@ -1,0 +1,55 @@
+{
+  "data": {
+    "id": "10.48550/arxiv.1706.03762",
+    "type": "dois",
+    "attributes": {
+      "doi": "10.48550/arxiv.1706.03762",
+      "prefix": "10.48550",
+      "suffix": "arxiv.1706.03762",
+      "identifiers": [{ "identifier": "1706.03762", "identifierType": "arXiv" }],
+      "alternateIdentifiers": [{ "alternateIdentifier": "1706.03762", "alternateIdentifierType": "arXiv" }],
+      "creators": [
+        { "name": "Vaswani, Ashish", "nameType": "Personal", "givenName": "Ashish", "familyName": "Vaswani", "affiliation": [], "nameIdentifiers": [] },
+        { "name": "Shazeer, Noam", "nameType": "Personal", "givenName": "Noam", "familyName": "Shazeer", "affiliation": [], "nameIdentifiers": [] },
+        { "name": "Parmar, Niki", "nameType": "Personal", "givenName": "Niki", "familyName": "Parmar", "affiliation": [], "nameIdentifiers": [] },
+        { "name": "Uszkoreit, Jakob", "nameType": "Personal", "givenName": "Jakob", "familyName": "Uszkoreit", "affiliation": [], "nameIdentifiers": [] },
+        { "name": "Jones, Llion", "nameType": "Personal", "givenName": "Llion", "familyName": "Jones", "affiliation": [], "nameIdentifiers": [] },
+        { "name": "Gomez, Aidan N.", "nameType": "Personal", "givenName": "Aidan N.", "familyName": "Gomez", "affiliation": [], "nameIdentifiers": [] },
+        { "name": "Kaiser, Lukasz", "nameType": "Personal", "givenName": "Lukasz", "familyName": "Kaiser", "affiliation": [], "nameIdentifiers": [] },
+        { "name": "Polosukhin, Illia", "nameType": "Personal", "givenName": "Illia", "familyName": "Polosukhin", "affiliation": [], "nameIdentifiers": [] }
+      ],
+      "titles": [{ "title": "Attention Is All You Need" }],
+      "publisher": "arXiv",
+      "container": {},
+      "publicationYear": 2017,
+      "subjects": [
+        { "lang": "en", "subject": "Computation and Language (cs.CL)", "schemeUri": "http://arxiv.org/archive/cs", "subjectScheme": "arXiv" },
+        { "subject": "FOS: Computer and information sciences", "subjectScheme": "Fields of Science and Technology (FOS)" }
+      ],
+      "contributors": [],
+      "dates": [
+        { "date": "2017-06-12T17:57:34Z", "dateType": "Submitted" },
+        { "date": "2023-08-02T00:00:00Z", "dateType": "Updated" },
+        { "date": "2017", "dateType": "Issued" }
+      ],
+      "language": null,
+      "types": { "ris": "GEN", "bibtex": "misc", "citeproc": "article", "schemaOrg": "CreativeWork", "resourceType": "Article", "resourceTypeGeneral": "Preprint" },
+      "relatedIdentifiers": [],
+      "sizes": [],
+      "formats": [],
+      "version": "7",
+      "rightsList": [{ "rights": "arXiv.org perpetual, non-exclusive license", "rightsUri": "http://arxiv.org/licenses/nonexclusive-distrib/1.0/" }],
+      "descriptions": [{ "description": "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks ...", "descriptionType": "Abstract" }],
+      "url": "https://arxiv.org/abs/1706.03762",
+      "schemaVersion": "http://datacite.org/schema/kernel-4",
+      "source": "mds",
+      "isActive": true,
+      "state": "findable",
+      "created": "2022-04-23T07:31:36.000Z",
+      "registered": "2022-04-23T07:31:37.000Z",
+      "published": "2017",
+      "updated": "2023-08-03T00:12:51.000Z"
+    },
+    "relationships": { "client": { "data": { "id": "arxiv.content", "type": "clients" } } }
+  }
+}

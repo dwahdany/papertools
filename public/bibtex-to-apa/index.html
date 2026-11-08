@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BibTeX → APA citation · papertools</title>
+  <meta name="description" content="Convert BibTeX entries to APA 7 references with proper italics, like Google Scholar's Cite box. Copy as rich text, Markdown, LaTeX or plain text. Runs entirely in your browser.">
+  <link rel="stylesheet" href="/assets/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%F0%9F%93%9D%3C/text%3E%3C/svg%3E">
+  <style>
+    /* Page-specific tweaks: per-reference copy button and the meta line under each entry. */
+    .entry { position: relative; padding-right: 3.6rem; margin: 0 0 0.9rem; }
+    .entry:last-child { margin-bottom: 0; }
+    .entry .copy-ref {
+      position: absolute; top: 0; right: 0; font-family: var(--sans); font-size: 0.75rem;
+      padding: 0.15rem 0.5rem; color: var(--fg-muted);
+    }
+    .entry .copy-ref:hover { color: var(--fg); }
+    .entry .meta { font-family: var(--sans); font-size: 0.8rem; margin: 0.15rem 0 0; }
+    .entry .meta code { font-size: 0.8rem; }
+    .entry .warnings { font-family: var(--sans); font-size: 0.8rem; margin: 0.1rem 0 0; color: var(--warn); }
+    .output .placeholder { color: var(--fg-muted); font-family: var(--sans); font-size: 0.95rem; }
+    ul.error { margin: 0.5rem 0 0; padding-left: 1.25rem; font-size: 0.9rem; }
+    ul.error:empty { display: none; }
+    .row.compact { margin: 0.25rem 0 0.5rem; }
+    .row.compact label.inline:has(select) { flex-wrap: wrap; }
+    .row.compact select { width: auto; max-width: 100%; padding: 0.3rem 0.4rem; font-size: 0.9rem; }
+    .formats .fmt-title { font-weight: 600; font-size: 0.95rem; margin: 0.75rem 0 0.25rem; }
+  </style>
+</head>
+<body>
+  <header class="site">
+    <div class="inner">
+      <a class="brand" href="/">papertools</a>
+      <nav aria-label="Tools">
+        <a href="/url-to-apa/">URL → APA</a>
+        <a href="/bibtex-to-apa/" aria-current="page">BibTeX → APA</a>
+        <a href="/markdown-compactor/">Markdown compactor</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <h1>BibTeX → APA citation</h1>
+    <p class="lead">Paste one or many BibTeX entries and get APA 7 references with proper italics, like Google Scholar's “Cite” box — then copy them as rich text, Markdown, LaTeX or plain text. Everything runs locally in your browser.</p>
+
+    <div class="grid two">
+      <div>
+        <label for="input">BibTeX input</label>
+        <textarea id="input" spellcheck="false" autocomplete="off" placeholder="@article{vaswani2017attention,
+  title={Attention is all you need},
+  author={Vaswani, Ashish and Shazeer, Noam and Parmar, Niki},
+  journal={Advances in Neural Information Processing Systems},
+  volume={30},
+  pages={5998--6008},
+  year={2017}
+}"></textarea>
+
+        <div class="row">
+          <button type="button" class="primary" id="convert">Convert</button>
+          <button type="button" id="load-example">Load example</button>
+          <button type="button" id="clear">Clear</button>
+          <button type="button" id="share">Share link</button>
+        </div>
+
+        <div class="row compact" role="group" aria-label="Options">
+          <label class="inline" for="opt-author-style">Author list style
+            <select id="opt-author-style">
+              <option value="apa7">APA 7 (up to 20 authors)</option>
+              <option value="scholar">Google Scholar (… &amp; last author after 6)</option>
+            </select>
+          </label>
+          <label class="inline" for="opt-sort">Sort
+            <select id="opt-sort">
+              <option value="input">Keep input order</option>
+              <option value="alpha">Alphabetical (APA reference list)</option>
+            </select>
+          </label>
+        </div>
+        <div class="row compact" role="group" aria-label="Formatting options">
+          <label class="inline"><input type="checkbox" id="opt-sentence-case" checked> Sentence-case titles (keeps {braces} and acronyms)</label>
+          <label class="inline"><input type="checkbox" id="opt-doi" checked> Include DOI / URL</label>
+        </div>
+        <p class="muted" id="hint">Converts as you type. Ctrl/⌘+Enter converts immediately.</p>
+      </div>
+
+      <div>
+        <label id="output-label">APA references</label>
+        <div class="row" role="group" aria-label="Copy">
+          <button type="button" class="primary" id="copy-rich">Copy rich text</button>
+          <button type="button" id="copy-markdown">Copy Markdown</button>
+          <button type="button" id="copy-latex">Copy LaTeX</button>
+          <button type="button" id="copy-plain">Copy plain text</button>
+        </div>
+        <div class="output serif" id="output" aria-labelledby="output-label" aria-live="polite"></div>
+        <ul class="error" id="errors" aria-live="polite"></ul>
+      </div>
+    </div>
+
+    <details class="formats">
+      <summary>Formats (Markdown, LaTeX, plain text)</summary>
+      <p class="fmt-title">Markdown</p>
+      <pre id="fmt-markdown"></pre>
+      <p class="fmt-title">LaTeX <span class="muted">(needs <code>\usepackage{hyperref}</code> or <code>url</code> for <code>\url{}</code>)</span></p>
+      <pre id="fmt-latex"></pre>
+      <p class="fmt-title">Plain text</p>
+      <pre id="fmt-plain"></pre>
+    </details>
+
+    <details>
+      <summary>Notes</summary>
+      <ul class="muted">
+        <li><strong>Sentence case</strong> is a heuristic: every word after the first is lowercased except the first word after a colon, question mark or other sentence break, words with an internal capital (<code>GPT-4</code>, <code>LLMs</code>, <code>iPhone</code>), and single capital letters. Proper nouns cannot be detected without a dictionary, so protect them with braces in BibTeX: <code>title={Introducing {Claude} 3}</code>. Journal names keep their capitalisation in APA 7 style (and are sentence-cased in Scholar style, mirroring Google Scholar).</li>
+        <li><strong>Author list style:</strong> APA 7 lists up to 20 authors and, for 21 or more, the first 19 followed by “…” and the last author. Google Scholar still uses the APA 6 rule: up to seven authors are listed in full; with eight or more you get the first six, “...”, and the last. Scholar style also omits DOIs and URLs and prints “(Year, Month)” for conference papers.</li>
+        <li><strong>Braces protect case.</strong> <code>{BERT}</code> or <code>{{Deep Learning}}</code> in a BibTeX title is never re-cased; the braces themselves are removed from the output. Escaped braces (<code>\{</code>, <code>\}</code>) are printed literally.</li>
+        <li><strong>LaTeX is decoded</strong> to Unicode: accents such as <code>\"{o}</code>, <code>\'e</code>, <code>\c{c}</code>, <code>{\L}</code>, <code>\ss</code>; <code>--</code> and <code>---</code> to en and em dashes; <code>``quotes''</code> to typographic quotes; <code>~</code> to a non-breaking space; <code>\emph{}</code>, <code>\textit{}</code> and <code>\url{}</code> are unwrapped. The standard month macros (<code>jan</code>…<code>dec</code>) and <code>@string</code> definitions are expanded.</li>
+        <li><strong>Entry types:</strong> <code>@article</code>, <code>@inproceedings</code>/<code>@conference</code>, <code>@book</code>, <code>@incollection</code>/<code>@inbook</code>, <code>@phdthesis</code>, <code>@mastersthesis</code>, <code>@techreport</code>, <code>@misc</code> (arXiv preprints are detected from <code>eprint</code>/<code>archivePrefix</code> or an arXiv URL), <code>@online</code>, <code>@software</code>, <code>@dataset</code>, <code>@patent</code>. Unknown types are formatted generically with a warning.</li>
+        <li><strong>Sharing:</strong> “Share link” puts your BibTeX into the URL fragment (<code>#bib=…</code>). Fragments are never sent to any server, so the link is still fully private; it is only available for inputs under 8 000 characters.</li>
+        <li><strong>Found a bug or a wrongly formatted reference?</strong> Please open an issue on GitHub (link in the footer) and include the BibTeX entry.</li>
+      </ul>
+      <p class="muted">Everything runs locally in your browser: nothing you paste leaves this page. Options are remembered in your browser's local storage.</p>
+    </details>
+  </main>
+  <footer class="site">
+    <div class="inner">Open source · <a href="https://github.com/dwahdany/papertools">github.com/dwahdany/papertools</a></div>
+  </footer>
+  <script type="module" src="/bibtex-to-apa/app.js"></script>
+</body>
+</html>

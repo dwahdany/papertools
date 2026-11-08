@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>URL → APA citation · papertools</title>
+  <meta name="description" content="Paste a DOI, arXiv, OpenReview, PubMed, ACL Anthology or Semantic Scholar link — or any web page — and get an APA 7 reference with italics plus BibTeX. Runs entirely in your browser.">
+  <link rel="stylesheet" href="/assets/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%F0%9F%93%9D%3C/text%3E%3C/svg%3E">
+  <style>
+    /* Page-specific tweaks; everything else comes from /assets/style.css. */
+    [hidden] { display: none !important; }
+    .lookup { display: flex; gap: 0.5rem; align-items: stretch; flex-wrap: wrap; margin: 0; }
+    .lookup input { flex: 1 1 20rem; }
+    .examples { margin: 0.5rem 0 0; display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+    .chip { font-size: 0.8rem; padding: 0.1rem 0.55rem; border-radius: 999px; color: var(--fg-muted); }
+    .chip:hover { color: var(--fg); }
+    .status { min-height: 1.5rem; margin: 0.75rem 0 0; }
+    .spinner {
+      display: inline-block; width: 0.8em; height: 0.8em; margin-right: 0.4em; vertical-align: -0.1em;
+      border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+    .result { margin-top: 1rem; }
+    ul.warn { margin: 0.5rem 0 0; padding-left: 1.25rem; font-size: 0.9rem; }
+    .error { margin: 1rem 0 0; }
+    .form-grid { display: grid; gap: 0 1rem; grid-template-columns: 1fr; }
+    @media (min-width: 760px) {
+      .form-grid { grid-template-columns: repeat(6, 1fr); }
+      .form-grid > * { grid-column: span 6; }
+      .form-grid .half { grid-column: span 3; }
+      .form-grid .third { grid-column: span 2; }
+    }
+    .form-grid label { margin-top: 0.6rem; }
+    .form-grid .muted { margin: 0.2rem 0 0; }
+    #f-authors { min-height: 6.5rem; font-family: var(--sans); font-size: 0.95rem; white-space: pre-wrap; }
+    input[type="date"] {
+      width: 100%; font: inherit; color: var(--fg); background: var(--bg);
+      border: 1px solid var(--border); border-radius: 6px; padding: 0.45rem 0.6rem;
+    }
+    details.card > summary { color: var(--fg); font-weight: 600; }
+    details.card { padding: 0.75rem 1rem; }
+    .how ul { padding-left: 1.25rem; }
+  </style>
+</head>
+<body>
+  <header class="site">
+    <div class="inner">
+      <a class="brand" href="/">papertools</a>
+      <nav aria-label="Tools">
+        <a href="/url-to-apa/" aria-current="page">URL → APA</a>
+        <a href="/bibtex-to-apa/">BibTeX → APA</a>
+        <a href="/markdown-compactor/">Markdown compactor</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <h1>URL → APA citation</h1>
+    <p class="lead">Paste a link or identifier — DOI, arXiv, OpenReview, PubMed, ACL Anthology, Semantic Scholar, ISBN, a publisher page or any web page — and get an APA 7 reference with proper italics, plus BibTeX. Lookups go straight from your browser to the public metadata APIs.</p>
+
+    <form class="lookup" id="lookup" autocomplete="off">
+      <label for="url" class="visually-hidden">URL, DOI or identifier</label>
+      <input type="text" id="url" name="q" placeholder="https://doi.org/10.1038/nature14539, arXiv:1706.03762, https://openreview.net/forum?id=…" spellcheck="false" autocapitalize="off" autofocus>
+      <button type="submit" class="primary" id="cite">Cite</button>
+    </form>
+    <p class="muted examples" id="examples">
+      <span>Examples:</span>
+      <button type="button" class="chip" data-q="10.1038/nature14539">DOI</button>
+      <button type="button" class="chip" data-q="https://arxiv.org/abs/1706.03762">arXiv</button>
+      <button type="button" class="chip" data-q="https://openreview.net/forum?id=YicbFdNTTy">OpenReview</button>
+      <button type="button" class="chip" data-q="https://pubmed.ncbi.nlm.nih.gov/31452104/">PubMed</button>
+      <button type="button" class="chip" data-q="https://aclanthology.org/N19-1423/">ACL Anthology</button>
+      <button type="button" class="chip" data-q="https://www.anthropic.com/news/claude-3-family">Web page</button>
+    </p>
+    <p class="muted status" id="status" aria-live="polite"></p>
+
+    <div class="row" role="group" aria-label="Options">
+      <label class="inline" for="opt-author-style">Author style
+        <select id="opt-author-style" style="width:auto">
+          <option value="apa7">APA 7 (up to 20 authors)</option>
+          <option value="scholar">Google Scholar (APA 6, 7 authors)</option>
+        </select>
+      </label>
+      <label class="inline"><input type="checkbox" id="opt-sentence-case" checked> Sentence-case titles</label>
+      <label class="inline"><input type="checkbox" id="opt-include-links" checked> Include DOI / URL</label>
+    </div>
+
+    <p class="error" id="error" hidden></p>
+
+    <section class="card result" id="result" hidden aria-labelledby="result-heading">
+      <h2 id="result-heading">APA reference</h2>
+      <div class="output serif" id="apa"></div>
+      <ul class="warn" id="warnings" hidden></ul>
+      <div class="row">
+        <button type="button" class="primary" id="copy-rich">Copy rich text</button>
+        <button type="button" id="copy-markdown">Copy Markdown</button>
+        <button type="button" id="copy-latex">Copy LaTeX</button>
+        <button type="button" id="copy-plain">Copy plain</button>
+      </div>
+      <details open id="bibtex-details">
+        <summary>BibTeX</summary>
+        <pre id="bibtex"></pre>
+        <div class="row">
+          <button type="button" id="copy-bibtex">Copy BibTeX</button>
+        </div>
+      </details>
+    </section>
+
+    <details class="card" id="edit" hidden>
+      <summary>Edit fields</summary>
+      <p class="muted" id="partial-note" hidden>This page couldn't be read from your browser (the site doesn't allow cross-origin requests). Fill in the title, author and date — the site name, URL and retrieval date are pre-filled.</p>
+      <form id="fields" class="form-grid" autocomplete="off">
+        <div class="half">
+          <label for="f-type">Type</label>
+          <select id="f-type"></select>
+        </div>
+        <div class="half">
+          <label for="f-accessed">Accessed (web pages)</label>
+          <input type="date" id="f-accessed">
+        </div>
+        <div>
+          <label for="f-authors">Authors</label>
+          <textarea id="f-authors" class="wrap" rows="4" placeholder="LeCun, Yann&#10;Geoffrey Hinton&#10;{World Health Organization}"></textarea>
+          <p class="muted">One per line, as “Family, Given” or “Given Family”. Wrap group authors in braces: <code>{OpenAI}</code>. Use <code>others</code> for “et al.”.</p>
+        </div>
+        <div>
+          <label for="f-title">Title</label>
+          <input type="text" id="f-title">
+        </div>
+        <div>
+          <label for="f-container">Journal / proceedings / book / site name</label>
+          <input type="text" id="f-container">
+        </div>
+        <div class="third">
+          <label for="f-year">Year</label>
+          <input type="text" id="f-year" inputmode="numeric">
+        </div>
+        <div class="third">
+          <label for="f-month">Month (1–12)</label>
+          <input type="text" id="f-month" inputmode="numeric">
+        </div>
+        <div class="third">
+          <label for="f-day">Day</label>
+          <input type="text" id="f-day" inputmode="numeric">
+        </div>
+        <div class="third">
+          <label for="f-volume">Volume</label>
+          <input type="text" id="f-volume">
+        </div>
+        <div class="third">
+          <label for="f-issue">Issue</label>
+          <input type="text" id="f-issue">
+        </div>
+        <div class="third">
+          <label for="f-pages">Pages</label>
+          <input type="text" id="f-pages" placeholder="436-444">
+        </div>
+        <div class="half">
+          <label for="f-publisher">Publisher / institution</label>
+          <input type="text" id="f-publisher">
+        </div>
+        <div class="half">
+          <label for="f-archive-id">arXiv id</label>
+          <input type="text" id="f-archive-id" placeholder="1706.03762">
+        </div>
+        <div class="half">
+          <label for="f-doi">DOI</label>
+          <input type="text" id="f-doi" placeholder="10.1038/nature14539">
+        </div>
+        <div class="half">
+          <label for="f-url">URL</label>
+          <input type="text" id="f-url">
+        </div>
+        <div class="row">
+          <button type="button" id="reset-fields">Reset to lookup result</button>
+          <span class="muted">Changes update the reference and BibTeX as you type.</span>
+        </div>
+      </form>
+    </details>
+
+    <details class="how">
+      <summary>How it works / privacy</summary>
+      <ul class="muted">
+        <li>The input is classified first: DOI (bare, doi.org or a publisher URL containing one), arXiv id or URL, OpenReview forum, PubMed id, ACL Anthology id, Semantic Scholar paper, ISBN, or a plain web page.</li>
+        <li>Metadata is then fetched from the matching public API: <strong>Crossref</strong> (DOIs, with <strong>DataCite</strong> as fallback), the <strong>arXiv</strong> export API, <strong>Semantic Scholar</strong> (ACL Anthology, Semantic Scholar and some publisher URLs), <strong>OpenReview</strong>, <strong>PubMed E-utilities</strong> and <strong>Open Library</strong> (ISBNs).</li>
+        <li>Plain web pages are read directly for <code>citation_*</code>, Open Graph, Dublin Core and JSON-LD metadata. Most sites do not allow cross-origin reads, so the editor opens with the site name, URL and retrieval date pre-filled for you to complete.</li>
+        <li>arXiv papers are cited as preprints; if arXiv knows a published version, a warning shows its DOI so you can cite that instead.</li>
+        <li>Requests go straight from your browser to those services — there is no server in between and nothing you look up is stored anywhere. Only your option choices are kept in your browser's local storage. The lookup is put in the page address so you can bookmark or share a result.</li>
+      </ul>
+    </details>
+  </main>
+  <footer class="site">
+    <div class="inner">Open source · <a href="https://github.com/dwahdany/papertools">github.com/dwahdany/papertools</a></div>
+  </footer>
+  <script type="module" src="/url-to-apa/app.js"></script>
+</body>
+</html>

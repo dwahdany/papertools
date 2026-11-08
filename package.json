@@ -5,7 +5,7 @@
   "description": "Small client-side tools for academic writing: URL → APA, BibTeX → APA, Markdown table compactor.",
   "type": "module",
   "scripts": {
-    "test": "node --test tests/",
+    "test": "node --test tests/*.test.js",
     "serve": "python3 -m http.server -d public 8000"
   },
   "license": "MIT"

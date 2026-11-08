@@ -1,0 +1,22 @@
+{
+  "paperId": "df2b0e26d0599ce3e70df8a9da02e51594e0e992",
+  "externalIds": { "MAG": "2896457183", "ACL": "N19-1423", "ArXiv": "1810.04805", "DBLP": "journals/corr/abs-1810-04805", "DOI": "10.18653/v1/N19-1423", "CorpusId": 52967399 },
+  "title": "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding",
+  "venue": "North American Chapter of the Association for Computational Linguistics",
+  "publicationVenue": {
+    "id": "1e33b3be-b2ab-46e9-96e8-d4eb4bad6e44",
+    "name": "North American Chapter of the Association for Computational Linguistics",
+    "type": "conference",
+    "alternate_names": ["NAACL"],
+    "url": "https://naacl.org/"
+  },
+  "year": 2019,
+  "journal": { "pages": "4171-4186" },
+  "publicationTypes": ["Conference"],
+  "authors": [
+    { "authorId": "39172707", "name": "Jacob Devlin" },
+    { "authorId": "1744179", "name": "Ming-Wei Chang" },
+    { "authorId": "2544107", "name": "Kenton Lee" },
+    { "authorId": "3259253", "name": "Kristina Toutanova" }
+  ]
+}

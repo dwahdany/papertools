@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Markdown table compactor · papertools</title>
+  <meta name="description" content="Strip padding whitespace and collapse separator dashes in Markdown tables to save tokens and bytes. Runs entirely in your browser.">
+  <link rel="stylesheet" href="/assets/style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%F0%9F%93%9D%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="site">
+    <div class="inner">
+      <a class="brand" href="/">papertools</a>
+      <nav aria-label="Tools">
+        <a href="/url-to-apa/">URL → APA</a>
+        <a href="/bibtex-to-apa/">BibTeX → APA</a>
+        <a href="/markdown-compactor/" aria-current="page">Markdown compactor</a>
+      </nav>
+    </div>
+  </header>
+  <main>
+    <h1>Markdown table compactor</h1>
+    <p class="lead">Paste Markdown with padded tables and get the same tables without alignment whitespace or long separator dashes — fewer bytes and fewer tokens for LLM prompts, identical rendering.</p>
+
+    <div class="grid two">
+      <div>
+        <label for="input">Markdown input</label>
+        <textarea id="input" spellcheck="false" autocomplete="off" placeholder="| Model      | Params | Acc.  |
+|:-----------|-------:|:-----:|
+| ResNet-50  | 25M    | 76.1  |
+| ViT-B/16   | 86M    | 81.8  |"></textarea>
+      </div>
+      <div>
+        <label for="output">Compacted output</label>
+        <textarea id="output" readonly spellcheck="false" placeholder="Model|Params|Acc.
+:-|-:|:-:
+ResNet-50|25M|76.1
+ViT-B/16|86M|81.8"></textarea>
+      </div>
+    </div>
+
+    <div class="row" role="group" aria-label="Options">
+      <label class="inline"><input type="checkbox" id="opt-keep-pipes"> Keep outer pipes</label>
+      <label class="inline"><input type="checkbox" id="opt-skip-code" checked> Skip fenced code blocks</label>
+      <label class="inline"><input type="checkbox" id="opt-collapse" checked> Collapse separator dashes</label>
+      <label class="inline"><input type="checkbox" id="opt-trim" checked> Trim trailing whitespace</label>
+    </div>
+
+    <div class="row between">
+      <div class="row" style="margin:0">
+        <button type="button" class="primary" id="compact">Compact</button>
+        <button type="button" id="copy">Copy output</button>
+        <button type="button" id="clear">Clear</button>
+        <a href="#" id="load-example">Load example</a>
+      </div>
+      <p class="muted" id="stats" aria-live="polite" style="margin:0">Paste Markdown to see how much you save. Ctrl/⌘+Enter compacts.</p>
+    </div>
+
+    <details>
+      <summary>How it works</summary>
+      <ul class="muted">
+        <li>Each table row is split into cells on pipes, every cell is trimmed, and cells are re-joined with a bare <code>|</code>. By default the outer pipes are dropped: <code>| a | b |</code> becomes <code>a|b</code>, which GitHub-flavoured Markdown renders identically.</li>
+        <li>Separator rows keep their alignment but lose the padding dashes: <code>|:-----|----:|</code> becomes <code>:-|-:</code>.</li>
+        <li>Escaped pipes (<code>\|</code>) and pipes inside <code>`code spans`</code> are never treated as cell borders, and fenced <code>```</code> / <code>~~~</code> code blocks are left untouched.</li>
+        <li>Tables are detected the GFM way (a header row followed by a delimiter row), including inside blockquotes and with up to three spaces of indentation. Lines that merely contain a pipe in prose are left alone; single-column tables and empty edge cells keep their pipes so the table stays a table.</li>
+        <li>Everything else — headings, paragraphs, lists, code — passes through unchanged (trailing whitespace is trimmed if that option is on). Line endings are normalised to <code>\n</code>.</li>
+      </ul>
+      <p class="muted">Everything runs locally in your browser: nothing you paste leaves this page. Options are remembered in your browser's local storage.</p>
+    </details>
+  </main>
+  <footer class="site">
+    <div class="inner">Open source · <a href="https://github.com/dwahdany/papertools">github.com/dwahdany/papertools</a></div>
+  </footer>
+  <script type="module" src="/markdown-compactor/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,68 @@
+{
+  "header": { "type": "esummary", "version": "0.3" },
+  "result": {
+    "uids": ["31452104"],
+    "31452104": {
+      "uid": "31452104",
+      "pubdate": "2019 Aug 27",
+      "epubdate": "2019 Aug 27",
+      "source": "Nat Commun",
+      "authors": [
+        { "name": "Vaswani A", "authtype": "Author", "clusterid": "" },
+        { "name": "Smith MW", "authtype": "Author", "clusterid": "" },
+        { "name": "de la Torre JM", "authtype": "Author", "clusterid": "" },
+        { "name": "The Example Consortium", "authtype": "CollectiveName", "clusterid": "" }
+      ],
+      "lastauthor": "de la Torre JM",
+      "title": "An illustrative article about deep learning in medicine.",
+      "sorttitle": "illustrative article about deep learning in medicine",
+      "volume": "10",
+      "issue": "1",
+      "pages": "3859",
+      "lang": ["eng"],
+      "nlmuniqueid": "101528555",
+      "issn": "",
+      "essn": "2041-1723",
+      "pubtype": ["Journal Article"],
+      "recordstatus": "PubMed - indexed for MEDLINE",
+      "pubstatus": "4",
+      "articleids": [
+        { "idtype": "pubmed", "idtypen": 1, "value": "31452104" },
+        { "idtype": "doi", "idtypen": 3, "value": "10.1038/s41467-019-11786-6" },
+        { "idtype": "pii", "idtypen": 4, "value": "10.1038/s41467-019-11786-6" },
+        { "idtype": "pmc", "idtypen": 8, "value": "PMC6763765" },
+        { "idtype": "rid", "idtypen": 8, "value": "31452104" },
+        { "idtype": "eid", "idtypen": 8, "value": "31452104" },
+        { "idtype": "pmcid", "idtypen": 5, "value": "pmc-id: PMC6763765;" }
+      ],
+      "history": [
+        { "pubstatus": "received", "date": "2019/01/14 00:00" },
+        { "pubstatus": "accepted", "date": "2019/07/29 00:00" },
+        { "pubstatus": "entrez", "date": "2019/08/28 06:00" }
+      ],
+      "references": [],
+      "attributes": ["Has Abstract"],
+      "pmcrefcount": 42,
+      "fulljournalname": "Nature communications",
+      "elocationid": "doi: 10.1038/s41467-019-11786-6",
+      "doctype": "citation",
+      "srccontriblist": [],
+      "booktitle": "",
+      "medium": "",
+      "edition": "",
+      "publisherlocation": "",
+      "publishername": "",
+      "srcdate": "",
+      "reportnumber": "",
+      "availablefromurl": "",
+      "locationlabel": "",
+      "doccontriblist": [],
+      "docdate": "",
+      "bookname": "",
+      "chapter": "",
+      "sortpubdate": "2019/08/27 00:00",
+      "sortfirstauthor": "Vaswani A",
+      "vernaculartitle": ""
+    }
+  }
+}

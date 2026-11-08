@@ -1,0 +1,26 @@
+{
+  "ISBN:9780262035613": {
+    "url": "https://openlibrary.org/books/OL26485827M/Deep_Learning",
+    "key": "/books/OL26485827M",
+    "title": "Deep Learning",
+    "subtitle": "Adaptive Computation and Machine Learning series",
+    "authors": [
+      { "url": "https://openlibrary.org/authors/OL7580981A/Ian_Goodfellow", "name": "Ian Goodfellow" },
+      { "url": "https://openlibrary.org/authors/OL7580982A/Yoshua_Bengio", "name": "Yoshua Bengio" },
+      { "url": "https://openlibrary.org/authors/OL7580983A/Aaron_Courville", "name": "Aaron Courville" }
+    ],
+    "number_of_pages": 800,
+    "identifiers": {
+      "isbn_10": ["0262035618"],
+      "isbn_13": ["9780262035613"],
+      "openlibrary": ["OL26485827M"],
+      "goodreads": ["24072897"]
+    },
+    "classifications": { "lc_classifications": ["Q325.5 .G66 2016"] },
+    "publishers": [{ "name": "The MIT Press" }],
+    "publish_places": [{ "name": "Cambridge, Massachusetts" }],
+    "publish_date": "Nov 18, 2016",
+    "subjects": [{ "name": "Machine learning", "url": "https://openlibrary.org/subjects/machine_learning" }],
+    "cover": { "small": "https://covers.openlibrary.org/b/id/8091016-S.jpg" }
+  }
+}
