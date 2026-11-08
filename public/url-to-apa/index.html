@@ -46,6 +46,8 @@
     details.card > summary { color: var(--fg); font-weight: 600; }
     details.card { padding: 0.75rem 1rem; }
     .how ul { padding-left: 1.25rem; }
+      #turnstile-host:empty, #turnstile-host:not(.active):not(:has(iframe)) { display: none; }
+    #turnstile-host { margin: 0.5rem 0; min-height: 0; }
   </style>
 </head>
 <body>
@@ -79,6 +81,7 @@
     </p>
     <p class="muted status" id="status" aria-live="polite"></p>
     <p class="muted sources" id="sources" hidden></p>
+    <div id="turnstile-host" class="turnstile" aria-label="Bot check"></div>
 
     <div class="row" role="group" aria-label="Options">
       <label class="inline" for="opt-author-style">Author style
@@ -190,7 +193,7 @@
       <ul class="muted">
         <li>The input is classified first: DOI (bare, doi.org or a publisher URL containing one), arXiv id or URL, OpenReview forum, PubMed id, ACL Anthology id, Semantic Scholar paper, ISBN, or a plain web page.</li>
         <li><strong>Paper identifiers go straight from your browser to the public APIs</strong>: <strong>Crossref</strong> for DOIs (then <strong>DataCite</strong>, then doi.org's citation data), <strong>DataCite</strong> for arXiv papers (it holds every arXiv record; <strong>Semantic Scholar</strong> is the fallback), <strong>Crossref</strong> for ACL Anthology papers, <strong>OpenReview</strong>, <strong>PubMed E-utilities</strong> and <strong>Open Library</strong> (ISBNs). The “Sources tried” line under the status shows which services answered.</li>
-        <li><strong>Ordinary web pages</strong> (blog posts, docs, news) are fetched by a small stateless function on this site (<code>/api/meta</code>), because browsers cannot read most third-party pages; it returns only the page <code>&lt;head&gt;</code>, which is parsed here for <code>citation_*</code>, Open Graph, Dublin Core and JSON-LD metadata. Pages that allow cross-origin reads (e.g. PMLR) are read directly, and the <strong>Internet Archive</strong> is the fallback when a page cannot be fetched. If everything fails, the editor opens with the site name, URL and retrieval date pre-filled for you to complete.</li>
+        <li><strong>Ordinary web pages</strong> (blog posts, docs, news) are fetched by a small stateless function on this site (<code>/api/meta</code>), because browsers cannot read most third-party pages; it returns only the page <code>&lt;head&gt;</code>, which is parsed here for <code>citation_*</code>, Open Graph, Dublin Core and JSON-LD metadata. That function only answers this site and is guarded by a Cloudflare Turnstile bot check, which runs silently and only shows a small widget if Cloudflare needs you to confirm you are human. Pages that allow cross-origin reads (e.g. PMLR) are read directly, and the <strong>Internet Archive</strong> is the fallback when a page cannot be fetched. If everything fails, the editor opens with the site name, URL and retrieval date pre-filled for you to complete.</li>
         <li>arXiv papers are cited as preprints; when a published version is known, a warning shows its DOI so you can cite that instead. OpenReview sometimes blocks automated requests with an anti-bot challenge; paste the paper's arXiv link or BibTeX in that case.</li>
         <li><strong>Nothing is stored.</strong> The page fetcher keeps no logs of its own and only passes the page's metadata back to your browser; everything else runs in your browser. Only your option choices are kept in your browser's local storage. The lookup is put in the page address so you can bookmark or share a result.</li>
       </ul>

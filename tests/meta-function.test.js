@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { handleMeta, isPublicHttpUrl, extractHead, pickCharset, decodeBytes, onRequestOptions } from '../functions/api/meta.js';
+import { handleMeta, handleConfig, isPublicHttpUrl, extractHead, pickCharset, decodeBytes, isSameOriginRequest, verifyTurnstile } from '../src/meta.js';
 
 const page = (head, body = '<body><p>hi</p></body>') => `<!doctype html><html lang="en"><head>${head}</head>${body}</html>`;
 const enc = new TextEncoder();
@@ -84,7 +84,7 @@ test('returns head, final url and content type for an HTML page', async () => {
   const fetch = fakeFetch({ 'https://example.com/post': { body: html, finalUrl: 'https://example.com/post/' } });
   const res = await handleMeta(req('?url=https://example.com/post'), { fetch });
   assert.equal(res.status, 200);
-  assert.equal(res.headers.get('access-control-allow-origin'), '*');
+  assert.equal(res.headers.get('access-control-allow-origin'), null);
   const data = await res.json();
   assert.equal(data.ok, true);
   assert.equal(data.url, 'https://example.com/post/');
@@ -294,11 +294,110 @@ test('pickCharset follows BOM > header > meta > utf-8 and normalises odd labels'
   assert.equal(decodeBytes(enc.encode('Café'), 'no-such-encoding'), 'Café');
 });
 
-test('onRequestOptions answers the CORS preflight', async () => {
-  const res = onRequestOptions();
-  assert.equal(res.status, 204);
-  assert.equal(res.headers.get('access-control-allow-origin'), '*');
-  assert.equal(res.headers.get('access-control-allow-methods'), 'GET, OPTIONS');
-  assert.equal(res.headers.get('access-control-allow-headers'), 'accept');
-  assert.equal(await res.text(), '');
+
+// ---------- access control ----------
+
+const OWN = 'https://papertools.pages.dev';
+const withHeaders = (q, headers) => new Request(`${OWN}/api/meta${q}`, { headers });
+
+test('isSameOriginRequest accepts same-origin and direct navigations, rejects other sites', () => {
+  assert.equal(isSameOriginRequest(withHeaders('', {})), true);
+  assert.equal(isSameOriginRequest(withHeaders('', { 'sec-fetch-site': 'same-origin' })), true);
+  assert.equal(isSameOriginRequest(withHeaders('', { 'sec-fetch-site': 'none' })), true);
+  assert.equal(isSameOriginRequest(withHeaders('', { origin: OWN, 'sec-fetch-site': 'same-origin' })), true);
+  assert.equal(isSameOriginRequest(withHeaders('', { referer: `${OWN}/url-to-apa/` })), true);
+  assert.equal(isSameOriginRequest(withHeaders('', { 'sec-fetch-site': 'cross-site' })), false);
+  assert.equal(isSameOriginRequest(withHeaders('', { 'sec-fetch-site': 'same-site' })), false);
+  assert.equal(isSameOriginRequest(withHeaders('', { origin: 'https://evil.example' })), false);
+  assert.equal(isSameOriginRequest(withHeaders('', { referer: 'https://evil.example/page' })), false);
+  assert.equal(isSameOriginRequest(withHeaders('', { referer: 'not a url' })), false);
+});
+
+test('cross-origin requests are refused with 403 before any fetch happens', async () => {
+  let fetched = false;
+  const fetch = async () => { fetched = true; return new Response('<html><head><title>x</title></head></html>', { headers: { 'content-type': 'text/html' } }); };
+  const res = await handleMeta(withHeaders('?url=https://example.com/', { origin: 'https://evil.example' }), { fetch });
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).code, 'cross-origin');
+  assert.equal(fetched, false);
+});
+
+function turnstileFetch(verifyResponder, pageHtml = page('<title>Guarded</title>')) {
+  const calls = [];
+  const fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    if (String(url).startsWith('https://challenges.cloudflare.com/turnstile/v0/siteverify')) return verifyResponder(init);
+    return new Response(pageHtml, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+  };
+  return { fetch, calls };
+}
+const okVerify = () => new Response(JSON.stringify({ success: true }), { headers: { 'content-type': 'application/json' } });
+const badVerify = () => new Response(JSON.stringify({ success: false, 'error-codes': ['invalid-input-response'] }), { headers: { 'content-type': 'application/json' } });
+const env = { TURNSTILE_SECRET_KEY: 'secret-123' };
+
+test('with a Turnstile secret configured, a missing token is refused with 403 and nothing is fetched', async () => {
+  const { fetch, calls } = turnstileFetch(okVerify);
+  const res = await handleMeta(req('?url=https://example.com/post'), { fetch, env });
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).code, 'turnstile-missing');
+  assert.equal(calls.length, 0);
+});
+
+test('a valid Turnstile token (header or query) is verified with the secret and client IP, then the page is fetched', async () => {
+  const { fetch, calls } = turnstileFetch(okVerify);
+  const res = await handleMeta(new Request(`${OWN}/api/meta?url=https://example.com/post`, {
+    headers: { 'cf-turnstile-response': 'tok-abc', 'cf-connecting-ip': '203.0.113.9' },
+  }), { fetch, env });
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).ok, true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].init.method, 'POST');
+  const form = new URLSearchParams(String(calls[0].init.body));
+  assert.equal(form.get('secret'), 'secret-123');
+  assert.equal(form.get('response'), 'tok-abc');
+  assert.equal(form.get('remoteip'), '203.0.113.9');
+  assert.equal(calls[1].url, 'https://example.com/post');
+
+  const viaQuery = await handleMeta(req('?url=https://example.com/post&turnstile=tok-q'), { fetch: turnstileFetch(okVerify).fetch, env });
+  assert.equal(viaQuery.status, 200);
+});
+
+test('an invalid Turnstile token is refused with 403 and the error codes', async () => {
+  const { fetch, calls } = turnstileFetch(badVerify);
+  const res = await handleMeta(new Request(`${OWN}/api/meta?url=https://example.com/post`, { headers: { 'cf-turnstile-response': 'bad' } }), { fetch, env });
+  assert.equal(res.status, 403);
+  const body = await res.json();
+  assert.equal(body.code, 'turnstile-failed');
+  assert.deepEqual(body.details, ['invalid-input-response']);
+  assert.equal(calls.length, 1);
+});
+
+test('an unreachable verification service yields 503, not a silent pass', async () => {
+  const down = turnstileFetch(() => { throw new TypeError('fetch failed'); });
+  const res = await handleMeta(new Request(`${OWN}/api/meta?url=https://example.com/post`, { headers: { 'cf-turnstile-response': 'tok' } }), { fetch: down.fetch, env });
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).code, 'turnstile-unavailable');
+  const http500 = turnstileFetch(() => new Response('oops', { status: 500 }));
+  const res2 = await handleMeta(new Request(`${OWN}/api/meta?url=https://example.com/post`, { headers: { 'cf-turnstile-response': 'tok' } }), { fetch: http500.fetch, env });
+  assert.equal(res2.status, 503);
+});
+
+test('without a secret the Turnstile check is skipped', async () => {
+  const { fetch, calls } = turnstileFetch(badVerify);
+  const res = await handleMeta(req('?url=https://example.com/post'), { fetch, env: {} });
+  assert.equal(res.status, 200);
+  assert.equal(calls.length, 1);
+});
+
+test('verifyTurnstile reports success, failure and unavailability', async () => {
+  assert.deepEqual(await verifyTurnstile('t', 's', null, okVerify), { ok: true, errors: [] });
+  assert.deepEqual(await verifyTurnstile('t', 's', null, badVerify), { ok: false, errors: ['invalid-input-response'] });
+  const unavailable = await verifyTurnstile('t', 's', null, async () => { throw new Error('boom'); });
+  assert.equal(unavailable.unavailable, true);
+});
+
+test('handleConfig exposes the site key only when configured', async () => {
+  assert.deepEqual(await handleConfig({ TURNSTILE_SITE_KEY: '1x00000000000000000000AA' }).json(), { turnstileSiteKey: '1x00000000000000000000AA' });
+  assert.deepEqual(await handleConfig({}).json(), { turnstileSiteKey: null });
+  assert.deepEqual(await handleConfig().json(), { turnstileSiteKey: null });
 });

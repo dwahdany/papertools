@@ -1,12 +1,22 @@
-// Cloudflare Pages Function: GET /api/meta?url=<http(s) URL>
+// Server-side page fetcher: GET /api/meta?url=<http(s) URL>  (used by src/worker.js)
 //
 // Browsers cannot read most third-party pages cross-origin, so the URL → APA
-// tool asks this function to fetch the page server-side. It returns the
+// tool asks this handler to fetch the page server-side. It returns the
 // document <head> (where the <meta>, <title>, JSON-LD and canonical link
 // live) and lets the client parse it with the same code used for pages that
 // do allow cross-origin reads. Nothing is stored; the response is cacheable.
 //
-// What the function enforces (it is reachable from any origin):
+// Access control:
+//   - same-origin only: a request that carries an Origin / Sec-Fetch-Site /
+//     Referer header pointing elsewhere is refused (403);
+//   - when env.TURNSTILE_SECRET_KEY is configured, every request must carry a
+//     Cloudflare Turnstile token (header cf-turnstile-response, or ?turnstile=)
+//     that verifies with the siteverify API; the client obtains it silently
+//     (see public/url-to-apa/app.js). Without the secret the check is skipped,
+//     so local previews keep working. GET /api/config tells the client whether
+//     a site key is configured.
+//
+// What the handler enforces on the fetch itself:
 //   - only public http(s) hosts, checked on the requested URL AND on every
 //     redirect hop (redirects are followed manually, at most MAX_REDIRECTS);
 //     the function's own host is refused too;
@@ -22,6 +32,8 @@
 //   { ok: true,  url: <final URL after redirects>, status, contentType, head: "<head>…</head>" }
 //   { ok: false, error: "<message>", status?, contentType?, url? }
 //     HTTP 400  bad input (missing / non-public URL, or a redirect to a non-public address)
+//     HTTP 403  cross-origin request, or missing / invalid Turnstile token (code: 'turnstile-missing' | 'turnstile-failed')
+//     HTTP 503  Turnstile verification service unreachable (code: 'turnstile-unavailable')
 //     HTTP 415  the final response is not an HTML document
 //     HTTP 422  the document has no <head> metadata to relay
 //     HTTP 502  upstream failure (unreachable, timed out, non-2xx, too many redirects)
@@ -35,11 +47,55 @@ const USER_AGENT =
   'Mozilla/5.0 (compatible; papertools/1.0; +https://github.com/dwahdany/papertools) ' +
   'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
 
+const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
-  'access-control-allow-origin': '*',
   'x-content-type-options': 'nosniff',
+  'cache-control': 'no-store',
 };
+
+/**
+ * True when the request comes from this site itself (or from a direct
+ * navigation). Browsers set Sec-Fetch-Site on every request and Origin on
+ * cross-origin fetches; a scripted client can forge both, which is why the
+ * Turnstile check exists — this is only the first, cheap filter.
+ */
+export function isSameOriginRequest(request) {
+  const own = new URL(request.url).origin;
+  const site = request.headers.get('sec-fetch-site');
+  if (site && site !== 'same-origin' && site !== 'none') return false;
+  const origin = request.headers.get('origin');
+  if (origin && origin !== 'null' && origin !== own) return false;
+  const referer = request.headers.get('referer');
+  if (!site && !origin && referer) {
+    try { if (new URL(referer).origin !== own) return false; } catch { return false; }
+  }
+  return true;
+}
+
+/**
+ * Verify a Turnstile token with Cloudflare's siteverify API.
+ * @returns {Promise<{ ok: boolean, unavailable?: boolean, errors?: string[] }>}
+ */
+export async function verifyTurnstile(token, secret, remoteIp, fetch = globalThis.fetch, verifyUrl = TURNSTILE_VERIFY_URL) {
+  const form = new URLSearchParams({ secret, response: token });
+  if (remoteIp) form.set('remoteip', remoteIp);
+  let data;
+  try {
+    const res = await fetch(verifyUrl, { method: 'POST', body: form, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+    if (!res.ok) return { ok: false, unavailable: true, errors: [`HTTP ${res.status}`] };
+    data = await res.json();
+  } catch (err) {
+    return { ok: false, unavailable: true, errors: [err?.message || 'network error'] };
+  }
+  return { ok: data?.success === true, errors: Array.isArray(data?.['error-codes']) ? data['error-codes'] : [] };
+}
+
+/** GET /api/config: tells the client whether Turnstile is configured. */
+export function handleConfig(env = {}) {
+  return json({ turnstileSiteKey: env.TURNSTILE_SITE_KEY || null }, 200, { 'cache-control': 'public, max-age=300' });
+}
 
 /** Reject URLs that point at non-public hosts (basic SSRF protection). */
 export function isPublicHttpUrl(raw) {
@@ -191,11 +247,28 @@ function json(body, status = 200, extra = {}) {
 }
 
 /**
- * Core handler, separated from the Pages entry point so it can be unit tested
- * with an injected fetch. `timeoutMs` and `maxBytes` exist for the tests.
+ * Core handler, separated from the Worker entry point so it can be unit tested
+ * with an injected fetch. `env` carries TURNSTILE_SECRET_KEY (optional);
+ * `timeoutMs` and `maxBytes` exist for the tests.
  */
-export async function handleMeta(request, { fetch = globalThis.fetch, timeoutMs = FETCH_TIMEOUT_MS, maxBytes = MAX_BYTES } = {}) {
+export async function handleMeta(request, { fetch = globalThis.fetch, env = {}, timeoutMs = FETCH_TIMEOUT_MS, maxBytes = MAX_BYTES } = {}) {
   const requestUrl = new URL(request.url);
+  if (!isSameOriginRequest(request)) {
+    return json({ ok: false, error: 'This endpoint only serves the papertools site itself.', code: 'cross-origin' }, 403);
+  }
+  if (env.TURNSTILE_SECRET_KEY) {
+    const token = request.headers.get('cf-turnstile-response') || requestUrl.searchParams.get('turnstile') || '';
+    if (!token) {
+      return json({ ok: false, error: 'Missing bot-check token. Reload the page and try again.', code: 'turnstile-missing' }, 403);
+    }
+    const verdict = await verifyTurnstile(token, env.TURNSTILE_SECRET_KEY, request.headers.get('cf-connecting-ip'), fetch);
+    if (verdict.unavailable) {
+      return json({ ok: false, error: 'The bot-check service could not be reached. Try again in a moment.', code: 'turnstile-unavailable' }, 503);
+    }
+    if (!verdict.ok) {
+      return json({ ok: false, error: 'Bot check failed. Reload the page and try again.', code: 'turnstile-failed', details: verdict.errors }, 403);
+    }
+  }
   const target = requestUrl.searchParams.get('url')?.trim();
   if (!target) return json({ ok: false, error: 'Missing ?url= parameter.' }, 400);
   // Never fetch ourselves (the function would recurse) and never leave the public Internet.
@@ -237,7 +310,7 @@ export async function handleMeta(request, { fetch = globalThis.fetch, timeoutMs 
     if (!head) {
       return json({ ok: false, error: 'The page has no <head> metadata.', status: upstream.status, contentType, url }, 422);
     }
-    return json({ ok: true, url, status: upstream.status, contentType, head }, 200, { 'cache-control': 'public, max-age=3600' });
+    return json({ ok: true, url, status: upstream.status, contentType, head }, 200, { 'cache-control': 'private, max-age=3600' });
   } catch (err) {
     switch (err?.name) {
       case 'PrivateRedirect':
@@ -254,14 +327,3 @@ export async function handleMeta(request, { fetch = globalThis.fetch, timeoutMs 
   }
 }
 
-export const onRequestGet = (context) => handleMeta(context.request);
-
-export const onRequestOptions = () => new Response(null, {
-  status: 204,
-  headers: {
-    'access-control-allow-origin': '*',
-    'access-control-allow-methods': 'GET, OPTIONS',
-    'access-control-allow-headers': 'accept',
-    'access-control-max-age': '86400',
-  },
-});

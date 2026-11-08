@@ -1,7 +1,9 @@
 // URL → APA citation page logic. The resolver talks to the public metadata APIs
 // directly from the browser; ordinary web pages go through this site's small
-// stateless /api/meta function (with the Internet Archive as fallback). The
-// formatter renders APA + BibTeX locally.
+// stateless /api/meta endpoint (with the Internet Archive as fallback). When
+// the site has Cloudflare Turnstile configured (GET /api/config says so), a
+// token is obtained silently and sent with that request. The formatter renders
+// APA + BibTeX locally.
 import { detectIdentifier, resolveReference, ResolveError, todayIso } from '../assets/resolve.js';
 import { formatApa } from '../assets/apa.js';
 import { referenceToBibtex, parseNames } from '../assets/bibtex.js';
@@ -322,6 +324,68 @@ function rememberQuery(query) {
  * message plus an editable (partial) reference whenever possible.
  * @param {string} rawInput
  */
+// ---------------------------------------------------------------------------
+// Turnstile (bot check for the page fetcher)
+// ---------------------------------------------------------------------------
+
+const TURNSTILE_SCRIPT = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=__papertoolsTurnstileReady';
+// Note: the host element must not be id="turnstile" — named window access would shadow the API global.
+const turnstileHost = $('#turnstile-host');
+/** @type {Promise<string|null>} resolves to the configured site key (null = Turnstile off). */
+const turnstileSiteKey = (async () => {
+  try {
+    const res = await fetch(new URL('/api/config', location.origin), { headers: { Accept: 'application/json' } });
+    if (!res.ok) return null;
+    const cfg = await res.json();
+    return typeof cfg.turnstileSiteKey === 'string' && cfg.turnstileSiteKey ? cfg.turnstileSiteKey : null;
+  } catch {
+    return null; // static hosting without the Worker: no fetcher, no bot check
+  }
+})();
+let turnstileApi = null;
+let turnstileWidget;
+
+/** Load the Turnstile script once. */
+function loadTurnstile() {
+  if (turnstileApi) return turnstileApi;
+  turnstileApi = new Promise((resolve, reject) => {
+    if (window.turnstile && typeof window.turnstile.render === 'function') { resolve(window.turnstile); return; }
+    window.__papertoolsTurnstileReady = () => {
+      if (window.turnstile && typeof window.turnstile.render === 'function') resolve(window.turnstile);
+      else { turnstileApi = null; reject(new Error('the bot-check script did not initialise')); }
+    };
+    const script = document.createElement('script');
+    script.src = TURNSTILE_SCRIPT;
+    script.async = true;
+    script.onerror = () => { turnstileApi = null; reject(new Error('the bot-check script could not be loaded')); };
+    document.head.appendChild(script);
+  });
+  return turnstileApi;
+}
+
+/**
+ * Obtain a fresh Turnstile token (tokens are single-use). Resolves to null
+ * when Turnstile is not configured on this deployment. The widget renders
+ * into #turnstile-host and only becomes visible if Cloudflare needs an interaction.
+ */
+async function turnstileToken() {
+  const siteKey = await turnstileSiteKey;
+  if (!siteKey || !turnstileHost) return null;
+  const ts = await loadTurnstile();
+  return new Promise((resolve, reject) => {
+    const settle = (fn) => (value) => { turnstileHost.classList.remove('active'); fn(value); };
+    if (turnstileWidget !== undefined) { try { ts.remove(turnstileWidget); } catch { /* already gone */ } }
+    turnstileHost.classList.add('active');
+    turnstileWidget = ts.render(turnstileHost, {
+      sitekey: siteKey,
+      appearance: 'interaction-only',
+      callback: settle(resolve),
+      'error-callback': settle(() => reject(new Error('the bot check could not be completed'))),
+      'unsupported-callback': settle(() => reject(new Error('this browser is not supported by the bot check'))),
+    });
+  });
+}
+
 async function lookup(rawInput) {
   const query = String(rawInput || '').trim();
   if (!query) {
@@ -339,7 +403,7 @@ async function lookup(rawInput) {
   setStatus(`Looking up … ${describeIdentifier(identifier) || 'checking the input'}`, true);
 
   try {
-    const result = await resolveReference(query, { signal: controller.signal });
+    const result = await resolveReference(query, { signal: controller.signal, metaToken: turnstileToken });
     if (controller.signal.aborted) return;
     // Failed attempts are listed in the sources line; keep only the other notes as warnings.
     showReference(result.reference, userWarnings(result.warnings, result.sources));

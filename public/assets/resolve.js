@@ -15,7 +15,7 @@
 //     Extra: arXiv identifiers carry `version` ("5" for "1706.03762v5", else undefined);
 //     `id` is always the version-less id.
 //
-//   resolveReference(input, { fetch?, signal?, now?, sleep?, metaEndpoint?, wayback? }) -> Promise<{
+//   resolveReference(input, { fetch?, signal?, now?, sleep?, metaEndpoint?, metaToken?, wayback? }) -> Promise<{
 //     reference: Reference,
 //     source: string,          // 'crossref' | 'datacite' | 'doi.org' | 'arxiv' | 'semanticscholar' |
 //                              // 'openreview' | 'pubmed' | 'openlibrary' | 'html-meta' | 'wayback' | 'url-only'
@@ -34,7 +34,9 @@
 //       signal       AbortSignal cancelling every request
 //       now          Date used for `accessed`
 //       sleep        (ms) => Promise, used for the Semantic Scholar back-off (default setTimeout)
-//       metaEndpoint URL of the page-fetching function (GET ?url=…, see functions/api/meta.js).
+//       metaEndpoint URL of the page-fetching endpoint (GET ?url=…, see src/meta.js).
+//       metaToken    optional async () => string|null returning a Cloudflare Turnstile token to send
+//                    as the cf-turnstile-response header with that request (null = send none).
 //                    Default: new URL('/api/meta', location.origin) in browsers; undefined in Node
 //                    (and when passed explicitly as null/undefined) -> the step is skipped.
 //       wayback      try the Internet Archive for web pages (default true)
@@ -716,7 +718,7 @@ async function fetchResponse(url, options = {}) {
   try {
     const response = await doFetch(url, {
       signal: controller.signal,
-      headers: { Accept: options.accept || 'application/json' },
+      headers: { Accept: options.accept || 'application/json', ...(options.headers || {}) },
     });
     if (!response.ok && !options.allowErrorStatus) {
       const err = new ResolveError(`${service} returned ${response.status}${subject}${statusHint(response.status)}`);
@@ -1415,6 +1417,7 @@ const S2_BACKOFF_MS = 2000;
  * @property {string[]} warnings
  * @property {Source[]} sources
  * @property {string} [metaEndpoint]
+ * @property {() => Promise<string|null>} [metaToken]
  * @property {boolean} wayback
  */
 
@@ -1431,7 +1434,7 @@ function defaultMetaEndpoint() {
  * Resolve any supported identifier or URL to a Reference.
  * @param {string} input
  * @param {{fetch?: typeof fetch, signal?: AbortSignal, now?: Date, sleep?: (ms: number) => Promise<void>,
- *   metaEndpoint?: string|null, wayback?: boolean}} [options]
+ *   metaEndpoint?: string|null, metaToken?: () => Promise<string|null>, wayback?: boolean}} [options]
  */
 async function resolveReference(input, options = {}) {
   const identifier = detectIdentifier(input);
@@ -1447,6 +1450,7 @@ async function resolveReference(input, options = {}) {
     warnings: [],
     sources: [],
     metaEndpoint: 'metaEndpoint' in options ? (options.metaEndpoint ? String(options.metaEndpoint) : undefined) : defaultMetaEndpoint(),
+    metaToken: typeof options.metaToken === 'function' ? options.metaToken : undefined,
     wayback: options.wayback !== false,
   };
   const strategies = {
@@ -1835,12 +1839,22 @@ async function resolveUrl(id, ctx) {
   if (ctx.metaEndpoint) {
     const viaFunction = await step(ctx, 'api-meta', async () => {
       const endpoint = `${ctx.metaEndpoint}${ctx.metaEndpoint.includes('?') ? '&' : '?'}url=${encodeURIComponent(url)}`;
-      const res = await fetchResponse(endpoint, { ...ctx, service: 'The page-fetching function', accept: 'application/json', allowErrorStatus: true });
+      let token = null;
+      if (ctx.metaToken) {
+        try { token = await ctx.metaToken(); } catch (err) { throw fail(`Bot check failed before fetching the page: ${err?.message || err}`, 'bot check failed'); }
+      }
+      const headers = token ? { 'cf-turnstile-response': token } : {};
+      const res = await fetchResponse(endpoint, { ...ctx, service: 'The page-fetching function', accept: 'application/json', allowErrorStatus: true, headers });
       let body = null;
       try { body = await res.json(); } catch { body = null; }
       if (!body || typeof body !== 'object' || !('ok' in body)) {
         if (res.status === 404) throw fail('The page-fetching function (/api/meta) is not available on this host', 'not available here');
         throw fail(`The page-fetching function returned ${res.status}`, `HTTP ${res.status}`);
+      }
+      if (!body.ok && typeof body.code === 'string' && body.code.startsWith('turnstile')) {
+        const unavailable = body.code === 'turnstile-unavailable';
+        throw fail(`The page fetcher ${unavailable ? 'could not verify the bot check' : 'refused the request'}: ${body.error}`,
+          unavailable ? 'bot-check service unavailable' : 'bot check failed');
       }
       if (!body.ok) throw fail(`Could not fetch ${host || 'the page'}: ${body.error || `HTTP ${res.status}`}`, body.status ? `page answered HTTP ${body.status}` : 'page unreachable');
       return htmlResult(ctx, str(body.head), collapse(body.url) || url, 'html-meta');
