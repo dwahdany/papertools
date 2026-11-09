@@ -5,6 +5,7 @@ import {
   normalizePageRange, defaultOptions,
 } from '../public/assets/apa.js';
 import { REFERENCE_TYPES, makeReference } from '../public/assets/model.js';
+import { parseBibtexToReferences } from '../public/assets/bibtex.js';
 
 const n = (family, given, extra = {}) => ({ family, given, ...extra });
 const SCHOLAR = { authorStyle: 'scholar' };
@@ -130,8 +131,15 @@ describe('Google Scholar golden outputs', () => {
       year: 2024, month: 3, day: 4, accessed: '2026-11-08',
     };
     expectAll(formatApa(ref), 'Anthropic. (2024, March 4). *Introducing Claude 3*. Retrieved November 8, 2026, from https://www.anthropic.com/news/claude-3');
+    // Only the URL itself is a url run: the "Retrieved …, from" prose stays plain text and outside \url{}.
+    assert.equal(formatApa(ref).latex, 'Anthropic. (2024, March 4). \\emph{Introducing Claude 3}. Retrieved November 8, 2026, from \\url{https://www.anthropic.com/news/claude-3}');
+    assert.deepEqual(formatApa(ref).segments.at(-1), { text: 'https://www.anthropic.com/news/claude-3', italic: false, url: true });
+    assert.equal(formatApa(ref).segments.at(-2).text, '. Retrieved November 8, 2026, from ');
+    assert.equal(formatApa(ref).segments.at(-2).url, undefined);
     const { accessed, ...noAccess } = ref;
     expectAll(formatApa(noAccess), 'Anthropic. (2024, March 4). *Introducing Claude 3*. https://www.anthropic.com/news/claude-3');
+    assert.equal(formatApa(noAccess).latex, 'Anthropic. (2024, March 4). \\emph{Introducing Claude 3}. \\url{https://www.anthropic.com/news/claude-3}');
+    assert.deepEqual(formatApa(noAccess).segments.at(-1), { text: 'https://www.anthropic.com/news/claude-3', italic: false, url: true });
     assert.equal(formatApa({ ...noAccess, day: undefined }).plain, 'Anthropic. (2024, March). Introducing Claude 3. https://www.anthropic.com/news/claude-3');
     const nd = formatApa({ type: 'webpage', author: [{ literal: 'Anthropic' }], title: 'Title', containerTitle: 'Anthropic', url: 'https://www.anthropic.com/x' });
     assert.equal(nd.plain, 'Anthropic. (n.d.). Title. https://www.anthropic.com/x');
@@ -255,6 +263,16 @@ describe('applyCase', () => {
     assert.equal(applyCase('Unbalanced } brace { Here', 'preserve'), 'Unbalanced  brace  Here');
   });
 
+  test('escaped braces \\{ \\} from bibtex.js become literal, protected braces', () => {
+    assert.equal(applyCase('Set \\{a\\} {NASA}', 'sentence'), 'Set {a} NASA');
+    assert.equal(applyCase('Set \\{a\\} braces', 'sentence'), 'Set {a} braces');
+    assert.equal(applyCase('Set notation \\{a, b\\} and {NASA} rules', 'preserve'), 'Set notation {a, b} and NASA rules');
+    // The literal brace content is protected: "\\{A, B\\}" keeps its case in sentence mode.
+    assert.equal(applyCase('The Set \\{A, B\\} Rules', 'sentence'), 'The set {A, B} rules');
+    // A stray backslash that is not followed by a brace is an ordinary character.
+    assert.equal(applyCase('A \\ B \\x {C}', 'preserve'), 'A \\ B \\x C');
+  });
+
   test('ALL-CAPS titles are lowercased then capitalised', () => {
     assert.equal(applyCase('ATTENTION IS ALL YOU NEED'), 'Attention is all you need');
     assert.equal(applyCase('ADAM: A METHOD FOR OPTIMIZATION'), 'Adam: A method for optimization');
@@ -300,7 +318,14 @@ describe('formatApa details', () => {
       type: 'book', author: [n('Doe', 'Jane')], editor: [n('Editor', 'Eve')], title: 'Collected Works',
       volume: 2, edition: '2nd', publisher: 'P', publisherPlace: 'New York', year: 2020,
     });
-    assert.equal(r.plain, 'Doe, J. (2020). Collected works (E. Editor, Ed.; 2nd ed.; Vol. 2). P.');
+    // APA 7: semicolon between the editor element and the edition/volume element, comma within the latter.
+    assert.equal(r.plain, 'Doe, J. (2020). Collected works (E. Editor, Ed.; 2nd ed., Vol. 2). P.');
+    const two = formatApa({ type: 'book', author: [n('Doe', 'Jane')], editor: [n('Editor', 'Eve'), n('Other', 'Al')], title: 'T', volume: 2, edition: '2nd', publisher: 'P', year: 2020 });
+    assert.equal(two.plain, 'Doe, J. (2020). T (E. Editor & A. Other, Eds.; 2nd ed., Vol. 2). P.');
+    assert.equal(formatApa({ type: 'book', author: [n('Doe', 'Jane')], editor: [n('Editor', 'Eve')], title: 'T', publisher: 'P', year: 2020 }).plain,
+      'Doe, J. (2020). T (E. Editor, Ed.). P.');
+    assert.equal(formatApa({ type: 'book', author: [n('Doe', 'Jane')], title: 'T', volume: 3, edition: '2nd', publisher: 'P', year: 2020 }).plain,
+      'Doe, J. (2020). T (2nd ed., Vol. 3). P.');
   });
 
   test('chapter without editors, with volume and single page', () => {
@@ -338,6 +363,28 @@ describe('formatApa details', () => {
     assert.equal(formatApa(ref, { includeDoi: false }).plain, 'Doe, J. (2020). T. J. https://example.org');
     assert.equal(formatApa(ref, { includeDoi: false, includeUrl: false }).plain, 'Doe, J. (2020). T. J.');
     assert.equal(formatApa(ref, SCHOLAR).plain, 'Doe, J. (2020). T. J.');
+  });
+
+  test('article-journal without any periodical data falls back to the publisher with a warning', () => {
+    // Crossref's x-bibtex export of a bioRxiv preprint: @article with a publisher but no journal.
+    const ref = {
+      type: 'article-journal', author: [n('Baek', 'Seungdae'), n('Park', 'Youngjin'), n('Paik', 'Se-Bum')],
+      title: 'Sparse long-range connections in visual cortex', year: 2020, month: 3,
+      publisher: 'openRxiv', doi: '10.1101/2020.03.19.998468', url: 'http://dx.doi.org/10.1101/2020.03.19.998468',
+    };
+    const r = formatApa(ref);
+    assert.equal(r.plain, 'Baek, S., Park, Y., & Paik, S.-B. (2020). Sparse long-range connections in visual cortex. openRxiv. https://doi.org/10.1101/2020.03.19.998468');
+    assert.deepEqual(r.warnings, ['No journal, volume or pages found; using the publisher as the source']);
+    assert.equal(formatApa(ref, SCHOLAR).plain, 'Baek, S., Park, Y., & Paik, S.-B. (2020). Sparse long-range connections in visual cortex. openRxiv.');
+    // Corporate author equal to the publisher: the publisher is still omitted (APA 7 rule).
+    assert.equal(formatApa({ type: 'article-journal', author: [{ literal: 'openRxiv' }], title: 'T', year: 2020, publisher: 'openRxiv' }).plain, 'openRxiv. (2020). T.');
+    // No publisher either: nothing is added and no publisher warning is raised.
+    const bare = formatApa({ type: 'article-journal', author: [n('Doe', 'Jane')], title: 'T', year: 2020 });
+    assert.equal(bare.plain, 'Doe, J. (2020). T.');
+    assert.deepEqual(bare.warnings, []);
+    // Any periodical datum keeps the journal form and ignores the publisher.
+    assert.equal(formatApa({ ...ref, containerTitle: 'bioRxiv', doi: undefined, url: undefined }).plain, 'Baek, S., Park, Y., & Paik, S.-B. (2020). Sparse long-range connections in visual cortex. bioRxiv.');
+    assert.equal(formatApa({ type: 'article-journal', author: [n('Doe', 'Jane')], title: 'T', year: 2020, volume: 3, publisher: 'P' }).plain, 'Doe, J. (2020). T. 3.');
   });
 
   test('sentenceCase false preserves titles and strips braces', () => {
@@ -430,6 +477,18 @@ describe('output formats', () => {
     assert.equal(r.latex, 'Doe, J., \\& Roe, R. (2020). Snakes \\& ladders: 100\\% <fun> with *stars*, under\\_scores and \\$5 braces. \\emph{Journal of "Quotes"}, \\emph{1}, 1--2. \\url{https://doi.org/10.1/a_b#c}');
     const t = formatApa({ type: 'book', author: [n('Doe', 'Jane')], title: 'C^2 ~ {x} \\ y #1', year: 2020 }, { sentenceCase: false }).latex;
     assert.equal(t, 'Doe, J. (2020). \\emph{C\\textasciicircum{}2 \\textasciitilde{} x \\textbackslash{} y \\#1}.');
+  });
+
+  test('escaped braces in titles render as literal braces in every output', () => {
+    const ref = { type: 'article-journal', author: [n('Tester', 'Ann')], title: 'Set notation \\{a, b\\} and {NASA} rules', containerTitle: 'J', year: 2022 };
+    const out = formatApa(ref);
+    expectAll(out, 'Tester, A. (2022). Set notation {a, b} and NASA rules. *J*.');
+    assert.equal(out.latex, 'Tester, A. (2022). Set notation \\{a, b\\} and NASA rules. \\emph{J}.');
+    // End to end from BibTeX: bibtex.js passes \\{ \\} through escaped so case protection stays distinguishable.
+    const { references: [parsed] } = parseBibtexToReferences('@article{a, author={Tester, Ann}, title={Set notation \\{a, b\\} and {NASA} rules}, journal={J}, year={2022}}');
+    assert.equal(parsed.title, 'Set notation \\{a, b\\} and {NASA} rules');
+    assert.equal(formatApa(parsed).plain, 'Tester, A. (2022). Set notation {a, b} and NASA rules. J.');
+    assert.equal(formatApa(parsed).latex, 'Tester, A. (2022). Set notation \\{a, b\\} and NASA rules. \\emph{J}.');
   });
 });
 

@@ -15,9 +15,15 @@
 //     - Robust to: nested braces, quotes containing braces, missing trailing
 //       comma, parentheses delimiters @article(...), Windows line endings, BOM,
 //       `%` comment lines outside entries (NOT inside values).
+//     - Error recovery is linear in the input size: after the first unbalanced
+//       entry a brace-match table is built once, so a file with thousands of
+//       broken entries parses in O(n) instead of O(errors x n).
 //
 //   latexToUnicode(s) -> string
-//     Decodes LaTeX accents/commands: \"{o} \"o {\"o} \'e \`e \^e \~n \c{c} \v{s}
+//     First decodes the HTML entities some exporters (e.g. Crossref) leave in
+//     values: &amp; &lt; &gt; &quot; &apos; &nbsp; and numeric &#NNN; / &#xHH;
+//     (other `&name;` text is left alone). Then
+//     decodes LaTeX accents/commands: \"{o} \"o {\"o} \'e \`e \^e \~n \c{c} \v{s}
 //     \H{o} \k{a} \={a} \.{z} \u{g} \r{a} \o \O \l \L \ss \ae \AE \oe \OE \aa \AA
 //     \i \j, ligatures, \& \% \$ \_ \# \{ \}, ~ -> nbsp (U+00A0), -- -> –,
 //     --- -> —, `` '' -> “ ”, ` ' -> ‘ ’, \textit{x}/\emph{x}/\textbf{x} -> x,
@@ -46,22 +52,39 @@
 //       phdthesis -> thesis (genre 'Doctoral dissertation', school -> institution)
 //       mastersthesis -> thesis (genre "Master's thesis")
 //       techreport -> report (institution, number, type -> genre)
-//       misc/unpublished/online/electronic -> preprint if eprint/archivePrefix=arXiv or
-//         journal/howpublished mentions arXiv, else webpage if url and no publisher, else generic
+//       misc/unpublished/online/electronic/www/webpage/manuscript -> preprint if
+//         eprint/archivePrefix=arXiv or journal/howpublished/note mentions arXiv;
+//         otherwise a `note` naming a kind wins ("Computer software" / "[Data set]"
+//         -> software/dataset, "Unpublished manuscript" / "Manuscript in
+//         preparation" / "Submitted for publication" -> manuscript, and that note
+//         is consumed: a non-default phrase becomes `genre`); otherwise
+//         online/electronic/www/webpage -> webpage if url (organization/journal/
+//         publisher/institution -> containerTitle), else generic;
+//         misc -> webpage if url and no publisher (nor textual howpublished), else generic;
+//         unpublished/manuscript -> manuscript (type -> genre)
 //       software -> software, dataset -> dataset, manual -> generic, patent -> patent
-//     Also: eprint + archiveprefix/primaryclass -> archive/archiveId; doi (strip
-//     https://doi.org/ prefix); url; year (int), month (name or number -> 1-12),
-//     date (biblatex "2017-06-12") -> year/month/day; urldate -> accessed;
+//     Also: eprint + archiveprefix/eprinttype -> archive/archiveId (primaryclass
+//     is not read); doi (strip https://doi.org/ prefix); url; year (int),
+//     month (name or number -> 1-12), day; date (biblatex "2017-06-12") ->
+//     year/month/day; urldate -> accessed; language/langid -> language;
 //     title/booktitle: latexToUnicode but KEEP braces; everything else decoded
 //     and brace-stripped. Preserve the citation key in `id`.
-//     Extra (non-model) field: `version` (from a `version` field).
+//     Also fills `version` (from a `version` field).
 //
 //   referenceToBibtex(ref) -> string
 //     Inverse mapping, producing a tidy entry with a generated key like
 //     `vaswani2017attention` (first author family lowercase + year + first
-//     significant title word), escaping &, %, and protecting acronyms in title
-//     with braces. Used by the URL tool. Honours an optional `ref.primaryClass`
-//     (arXiv category) when emitting preprints.
+//     significant title word), escaping & % # _ $ (and a literal ~ as
+//     \textasciitilde{}; nbsp -> ~), emitting year/month/day and language, and
+//     protecting acronyms in title with braces: a whitespace token is braced
+//     when one of its words (split like apa.js sentenceCase, i.e. at hyphens,
+//     slashes, ...) has an uppercase letter after its first character ("GPT-4",
+//     "ReLU", "LLMs"), so Title-Case compounds ("Zero-Shot") stay unprotected
+//     and tokens starting with a control sequence ("\pi-Tuning") are left alone.
+//     Name parts containing " and " or a comma are braced so they re-parse as
+//     one person. manuscript -> @unpublished with note "Unpublished manuscript"
+//     (or `type = {genre}` for another genre). Used by the URL tool. Honours an
+//     optional `ref.primaryClass` (arXiv category) when emitting preprints.
 //
 //   parseBibtexToReferences(text) -> { references: Reference[], errors }
 //     Convenience: parseBibtex + bibtexToReference on every entry.
@@ -228,10 +251,41 @@ function readToken(cur, re) {
   return cur.text.slice(start, cur.pos);
 }
 
+/**
+ * Brace-match table for the whole input, built lazily (once per parse) the
+ * first time a scan runs off the end of the text. `match[i]` is the index of
+ * the `}` closing the `{` at `i`, or -1. Uses the same escape rule as the
+ * readers (a backslash hides the next character), so for every `{` the readers
+ * are positioned at, the table agrees with their local scan. Well-formed input
+ * never builds it; corrupted input pays one O(n) pass and then O(1) per
+ * unbalanced entry instead of a scan to EOF each time.
+ */
+function braceMatches(cur) {
+  if (cur.shared.braceMatch) return cur.shared.braceMatch;
+  const { text } = cur;
+  const match = new Int32Array(text.length).fill(-1);
+  const stack = [];
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '\\') { i++; continue; }
+    if (ch === '{') stack.push(i);
+    else if (ch === '}' && stack.length) match[stack.pop()] = i;
+  }
+  cur.shared.braceMatch = match;
+  return match;
+}
+
 /** Read `{...}` at cur.pos; returns the inner text. */
 function readBraced(cur) {
   const { text } = cur;
   const start = cur.pos;
+  const table = cur.shared.braceMatch;
+  if (table) {
+    const end = table[start];
+    if (end < 0) throw new BibParseError(`Unbalanced braces in entry "${cur.key}"`, start);
+    cur.pos = end + 1;
+    return text.slice(start + 1, end);
+  }
   let depth = 0;
   for (let i = start; i < text.length; i++) {
     const ch = text[i];
@@ -245,6 +299,7 @@ function readBraced(cur) {
       }
     }
   }
+  braceMatches(cur);
   throw new BibParseError(`Unbalanced braces in entry "${cur.key}"`, start);
 }
 
@@ -252,12 +307,20 @@ function readBraced(cur) {
 function readQuoted(cur) {
   const { text } = cur;
   const start = cur.pos;
+  const table = cur.shared.braceMatch;
   let depth = 0;
   for (let i = start + 1; i < text.length; i++) {
     const ch = text[i];
     if (ch === '\\') { i++; continue; }
-    if (ch === '{') depth++;
-    else if (ch === '}') {
+    if (ch === '{') {
+      if (table) {
+        // An unmatched `{` can never let the scan return to depth 0.
+        if (table[i] < 0) throw new BibParseError(`Unterminated quoted value in entry "${cur.key}"`, start);
+        i = table[i];
+        continue;
+      }
+      depth++;
+    } else if (ch === '}') {
       depth--;
       if (depth < 0) throw new BibParseError(`Unbalanced braces in quoted value in entry "${cur.key}"`, start);
     } else if (ch === '"' && depth === 0) {
@@ -265,6 +328,7 @@ function readQuoted(cur) {
       return text.slice(start + 1, i);
     }
   }
+  braceMatches(cur);
   throw new BibParseError(`Unterminated quoted value in entry "${cur.key}"`, start);
 }
 
@@ -320,6 +384,22 @@ function readFields(cur, macros) {
 /** Skip the body of @comment / @preamble up to the matching close delimiter. */
 function skipBody(cur) {
   const { text } = cur;
+  const table = cur.shared.braceMatch;
+  if (table && cur.close === '}') {
+    // Same rule as the loop below, in O(local): the body ends at the first
+    // `}` seen at body level, or right after the first body-level group.
+    for (let i = cur.pos; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === '\\') { i++; continue; }
+      if (ch === '{') {
+        if (table[i] < 0) break;
+        cur.pos = table[i] + 1;
+        return;
+      }
+      if (ch === '}') { cur.pos = i + 1; return; }
+    }
+    throw new BibParseError('Unterminated @comment or @preamble', cur.openPos);
+  }
   let depth = 0;
   for (let i = cur.pos; i < text.length; i++) {
     const ch = text[i];
@@ -331,6 +411,7 @@ function skipBody(cur) {
       return;
     }
   }
+  braceMatches(cur);
   throw new BibParseError('Unterminated @comment or @preamble', cur.openPos);
 }
 
@@ -362,13 +443,14 @@ function parseBibtex(input) {
   const errors = [];
   const macros = new Map(Object.entries(MONTH_MACROS));
   const lineOf = makeLineLocator(text);
+  const shared = { braceMatch: null }; // see braceMatches()
   let pos = 0;
   while (pos < text.length) {
     const at = findNextAt(text, pos);
     if (at < 0) break;
     const head = readEntryHead(text, at);
     if (!head) { pos = at + 1; continue; }
-    const cur = { text, pos: head.bodyStart, close: head.close, openPos: head.openPos, key: '' };
+    const cur = { text, pos: head.bodyStart, close: head.close, openPos: head.openPos, key: '', shared };
     try {
       if (head.type === 'comment' || head.type === 'preamble') {
         skipBody(cur);
@@ -583,6 +665,23 @@ function decodeLatex(s) {
   return out;
 }
 
+const HTML_ENTITIES = Object.freeze({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' });
+const HTML_ENTITY_RE = /&(?:(amp|lt|gt|quot|apos|nbsp)|#(\d{1,7})|#x([0-9a-f]{1,6}));/gi;
+
+/**
+ * Decode the HTML entities some exporters leave in BibTeX values (Crossref's
+ * x-bibtex emits `Knowledge Discovery &amp; Data Mining`). Only the explicit
+ * named set and numeric references are decoded; other `&name;` text is kept.
+ */
+function decodeHtmlEntities(s) {
+  if (!s.includes('&')) return s;
+  return s.replace(HTML_ENTITY_RE, (m, name, dec, hex) => {
+    if (name) return HTML_ENTITIES[name.toLowerCase()];
+    const cp = dec ? Number(dec) : parseInt(hex, 16);
+    return cp > 0 && cp <= 0x10FFFF ? String.fromCodePoint(cp) : m;
+  });
+}
+
 /**
  * Decode LaTeX markup to Unicode (NFC). Braces are kept; `\{` `\}` stay escaped.
  * @param {string} input
@@ -592,7 +691,7 @@ function latexToUnicode(input) {
   if (input === null || input === undefined) return '';
   const s = String(input);
   if (URL_LIKE_RE.test(s)) return s;
-  return decodeLatex(s).normalize('NFC');
+  return decodeLatex(decodeHtmlEntities(s)).normalize('NFC');
 }
 
 /**
@@ -786,7 +885,7 @@ const BIB_TYPE_TO_REF = Object.freeze({
   phdthesis: 'thesis', mastersthesis: 'thesis', thesis: 'thesis',
   techreport: 'report', report: 'report',
   software: 'software', dataset: 'dataset', manual: 'generic', patent: 'patent',
-  misc: 'generic', unpublished: 'generic', online: 'webpage', electronic: 'webpage',
+  misc: 'generic', unpublished: 'manuscript', online: 'webpage', electronic: 'webpage',
   www: 'webpage', webpage: 'webpage', manuscript: 'manuscript',
 });
 
@@ -949,8 +1048,24 @@ function interpretNote(note) {
     out.kind = /data/i.test(marker[2]) ? 'dataset' : 'software';
     rest = marker[1].replace(/[.;,]\s*$/, '');
   }
+  const manuscript = MANUSCRIPT_NOTE_RE.exec(rest);
+  if (manuscript) {
+    // The whole note is a manuscript-status phrase: it is the kind (and, when
+    // not the APA default, the genre). The caller drops it from `note` when
+    // the entry resolves to a manuscript; other types keep it as a note.
+    out.kind = 'manuscript';
+    const phrase = manuscript[1].replace(/\s+/g, ' ');
+    if (!isDefaultManuscriptGenre(phrase)) out.genre = phrase[0].toUpperCase() + phrase.slice(1);
+  }
   if (rest) out.note = rest;
   return out;
+}
+
+const DEFAULT_MANUSCRIPT_GENRE = 'Unpublished manuscript';
+const MANUSCRIPT_NOTE_RE = /^\[?(unpublished manuscript|manuscript (?:in preparation|submitted for publication|under review)|in preparation|submitted for publication|under review)\]?\.?$/i;
+
+function isDefaultManuscriptGenre(genre) {
+  return String(genre).trim().toLowerCase() === DEFAULT_MANUSCRIPT_GENRE.toLowerCase();
 }
 
 /**
@@ -1041,7 +1156,7 @@ function bibtexToReference(entry) {
     if (archive || arxivJournal) type = 'preprint';
     else if (noteInfo.kind) type = noteInfo.kind;
     else if (type === 'webpage') type = hasUrl ? 'webpage' : 'generic';
-    else if (bibType === 'manuscript') type = 'manuscript';
+    else if (type === 'manuscript') type = 'manuscript';
     else type = hasUrl && !hasPublisher ? 'webpage' : 'generic';
   }
   ref.type = type;
@@ -1099,7 +1214,7 @@ function bibtexToReference(entry) {
       Object.assign(ref, { containerTitle: organization || journal || publisher || institution });
       break;
     case 'manuscript':
-      Object.assign(ref, { genre: typeField, publisherPlace: address });
+      Object.assign(ref, { genre: typeField || noteInfo.genre, publisherPlace: address });
       break;
     default:
       Object.assign(ref, {
@@ -1116,7 +1231,8 @@ function bibtexToReference(entry) {
     ref.archiveId = archive.archiveId;
   }
   if (noteInfo.accessed && !ref.accessed) ref.accessed = noteInfo.accessed;
-  if (noteInfo.note) ref.note = noteInfo.note;
+  // A manuscript-status note is represented by the type/genre, not repeated as a note.
+  if (noteInfo.note && !(type === 'manuscript' && noteInfo.kind === 'manuscript')) ref.note = noteInfo.note;
   ref.language = txt('language', 'langid');
   if (version) ref.version = version;
   return compactReference(ref);
@@ -1162,12 +1278,37 @@ function makeKey(ref) {
   return key || 'ref';
 }
 
-/** Escape BibTeX special characters in a plain-text value; nbsp -> ~. */
+/**
+ * Escape BibTeX special characters in a plain-text value: & % # _ $ get a
+ * backslash (already-escaped ones are left alone), a literal ~ becomes
+ * \textasciitilde{} and nbsp -> ~. A bare backslash is NOT escaped: values
+ * legitimately carry control sequences left by math (`\pi`) and `\{` `\}`.
+ */
 function bibEscape(s) {
-  return String(s).replace(/ /g, '~').replace(/(?<!\\)([&%#_])/g, '\\$1');
+  return String(s)
+    .replace(/~/g, '\\textasciitilde{}')
+    .replace(/ /g, '~')
+    .replace(/(?<!\\)([&%#_$])/g, '\\$1');
 }
 
-/** Wrap words with inner capitals / all caps in braces, leaving existing groups alone. */
+/** Word segmentation shared with apa.js sentenceCase (keep the two in sync). */
+const WORD_RE = /[\p{L}\p{N}](?:[\p{L}\p{N}'’]|\.(?=[\p{L}\p{N}]))*/gu;
+
+/** Does a word (as apa.js sentenceCase sees it) have an uppercase letter after its first character? */
+function hasInternalCapital(word) {
+  return /\p{Lu}/u.test(Array.from(word).slice(1).join(''));
+}
+
+/**
+ * Wrap tokens that sentence-casing would damage in braces, leaving existing
+ * groups alone. A whitespace-delimited token is protected when one of its
+ * words has an inner capital ("GPT-4", "ReLU", "LLMs", "BERT-base", "AI/ML");
+ * Title-Case compounds ("Zero-Shot", "Coarse-to-Fine") are left alone because
+ * apa.js treats their hyphen-separated parts as separate words and lowercases
+ * them. Leading punctuation stays outside the braces; a token whose core
+ * starts with a control sequence ("\pi-Tuning") is returned unchanged so no
+ * brace is ever inserted right after a backslash.
+ */
 function protectTitle(title) {
   if (!title) return title;
   const tokens = [];
@@ -1187,10 +1328,13 @@ function protectTitle(title) {
   if (cur) tokens.push(cur);
   return tokens.map((tok) => {
     if (/\s/.test(tok) || /[{}]/.test(tok)) return tok;
-    const m = /^([^\p{L}\p{N}]*)(.*?)([^\p{L}\p{N}]*)$/su.exec(tok);
+    // The prefix group never swallows a backslash, so `\pi-Tuning` keeps its
+    // control sequence in the core (and is then skipped) instead of becoming `\{pi-Tuning}`.
+    const m = /^([^\p{L}\p{N}\\]*)(.*?)([^\p{L}\p{N}]*)$/su.exec(tok);
     const core = m[2];
-    if (core.length >= 2 && /\p{Lu}/u.test(core.slice(1))) return `${m[1]}{${core}}${m[3]}`;
-    return tok;
+    if (!core || core.startsWith('\\')) return tok;
+    const needsProtection = [...core.matchAll(WORD_RE)].some((w) => hasInternalCapital(w[0]));
+    return needsProtection ? `${m[1]}{${core}}${m[3]}` : tok;
   }).join('');
 }
 
@@ -1198,13 +1342,15 @@ function protectTitle(title) {
 function formatBibName(n) {
   if (!n || typeof n !== 'object') return '';
   if (n.literal) return /^others$/i.test(n.literal.trim()) ? 'others' : `{${bibEscape(n.literal)}}`;
-  let family = n.family ? bibEscape(n.family) : '';
+  // A part containing " and " or a comma must be braced or it re-parses as two people / wrong form.
+  const guard = (s) => (/(^|[\s~])and([\s~]|$)/i.test(s) || s.includes(',') ? `{${s}}` : s);
+  let family = n.family ? guard(bibEscape(n.family)) : '';
   if (family && /^\p{Ll}/u.test(family.trim())) family = `{${family}}`;
-  const vonLast = [n.particle ? bibEscape(n.particle) : '', family].filter(Boolean).join(' ');
-  const given = n.given ? bibEscape(n.given) : '';
+  const vonLast = [n.particle ? guard(bibEscape(n.particle)) : '', family].filter(Boolean).join(' ');
+  const given = n.given ? guard(bibEscape(n.given)) : '';
   if (!vonLast) return given;
   const parts = [vonLast];
-  if (n.suffix) parts.push(bibEscape(n.suffix));
+  if (n.suffix) parts.push(guard(bibEscape(n.suffix)));
   if (given) parts.push(given);
   return parts.join(', ');
 }
@@ -1289,7 +1435,12 @@ function referenceToBibtex(ref) {
   }
 
   add('year', Number.isFinite(r.year) ? r.year : undefined);
-  if (Number.isInteger(r.month) && r.month >= 1 && r.month <= 12) add('month', MONTH_NAMES[r.month - 1].slice(0, 3).toLowerCase(), { bare: true });
+  if (Number.isInteger(r.month) && r.month >= 1 && r.month <= 12) {
+    add('month', MONTH_NAMES[r.month - 1].slice(0, 3).toLowerCase(), { bare: true });
+    // `day` (read back by bibtexToReference and understood by biblatex) keeps
+    // web-page dates like "(2023, March 27)" intact; classic styles ignore it.
+    if (Number.isInteger(r.day) && r.day >= 1 && r.day <= 31) add('day', r.day);
+  }
 
   if (type === 'misc' && r.type === 'webpage') {
     add('organization', r.containerTitle);
@@ -1307,11 +1458,14 @@ function referenceToBibtex(ref) {
     if (r.genre && r.genre !== defaultGenre) add('type', r.genre);
   } else if (type === 'techreport') {
     if (r.genre && r.genre !== 'Technical report') add('type', r.genre);
-  } else if (type === 'patent' || type === 'unpublished') {
+  } else if (type === 'patent') {
     add('type', r.genre);
+  } else if (type === 'unpublished') {
+    if (r.genre && !isDefaultManuscriptGenre(r.genre)) add('type', r.genre);
   }
   add('edition', r.edition);
   add('version', r.version);
+  add('language', r.language);
   add('doi', r.doi, { verbatim: true });
   if (r.type !== 'webpage') add('url', r.url, { verbatim: true });
   if (r.type === 'preprint' && r.archiveId) {
@@ -1325,7 +1479,9 @@ function referenceToBibtex(ref) {
   if (r.type === 'webpage' && r.accessed) note = [note, `Accessed: ${r.accessed}`].filter(Boolean).join('. ');
   if (r.type === 'software') note = note ? `${note} [Computer software]` : 'Computer software';
   if (r.type === 'dataset') note = note ? `${note} [Data set]` : 'Data set';
-  if (type === 'unpublished' && !note) note = 'Unpublished manuscript';
+  // The default genre travels as the standard @unpublished note; a non-default
+  // genre is already emitted as `type`, so no note is invented for it.
+  if (type === 'unpublished' && !note && !(r.genre && !isDefaultManuscriptGenre(r.genre))) note = DEFAULT_MANUSCRIPT_GENRE;
   add('note', note);
   add('urldate', r.accessed, { verbatim: true });
 

@@ -1206,7 +1206,7 @@ describe('resolveReference', () => {
     assert.match(r.warnings[2], /^Metadata read from an Internet Archive snapshot dated 2026-11-04/);
     assert.deepEqual(r.sources.map((x) => [x.name, x.status, x.detail]), [
       ['api-meta', 'failed', 'page unreachable'],
-      ['direct', 'failed', 'unreachable (blocked by CORS or offline)'],
+      ['direct', 'failed', 'unreachable (blocked by CORS, rate-limited or offline)'],
       ['wayback', 'ok', undefined],
     ]);
     assert.deepEqual(f.hosts(), ['papertools.pages.dev', 'openai.com', 'archive.org', 'web.archive.org']);
@@ -1243,7 +1243,7 @@ describe('resolveReference', () => {
       assert.equal(e.partial.identifier.kind, 'url');
       assert.deepEqual(e.partial.sources.map((x) => [x.name, x.status, x.detail]), [
         ['api-meta', 'skipped', 'no page-fetching function configured'],
-        ['direct', 'failed', 'unreachable (blocked by CORS or offline)'],
+        ['direct', 'failed', 'unreachable (blocked by CORS, rate-limited or offline)'],
         ['wayback', 'failed', 'no snapshot'],
       ]);
       assert.equal(e.partial.warnings.length, 2);
@@ -1328,4 +1328,26 @@ describe('resolveReference', () => {
     controller.abort();
     await assert.rejects(p, (e) => e instanceof ResolveError && /cancelled/.test(e.message) && e.partial.sources.length === 0);
   });
+});
+
+test('resolveReference sends a Turnstile token to /api/meta when metaToken is given, and reports a refused token', async () => {
+  const seen = [];
+  const htmlHead = '<head><title>Guarded page</title><meta property="og:site_name" content="Example"><meta property="article:published_time" content="2024-02-03"></head>';
+  const fakeFetch = async (url, init) => {
+    seen.push({ url: String(url), headers: init && init.headers ? { ...init.headers } : {} });
+    if (String(url).startsWith('https://meta.test/api/meta')) {
+      const token = seen[seen.length - 1].headers['cf-turnstile-response'];
+      if (token !== 'tok-1') return new Response(JSON.stringify({ ok: false, error: 'Bot check failed.', code: 'turnstile-failed' }), { status: 403, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ ok: true, url: 'https://example.com/post', status: 200, contentType: 'text/html', head: htmlHead }), { headers: { 'content-type': 'application/json' } });
+    }
+    throw new TypeError('Failed to fetch');
+  };
+  const ok = await resolveReference('https://example.com/post', { fetch: fakeFetch, metaEndpoint: 'https://meta.test/api/meta', wayback: false, metaToken: async () => 'tok-1' });
+  assert.equal(ok.reference.title, 'Guarded page');
+  assert.equal(seen[0].headers['cf-turnstile-response'], 'tok-1');
+
+  await assert.rejects(
+    resolveReference('https://example.com/post', { fetch: fakeFetch, metaEndpoint: 'https://meta.test/api/meta', wayback: false, metaToken: async () => 'stale' }),
+    (err) => err instanceof ResolveError && err.partial.sources.some((s) => s.name === 'api-meta' && s.status === 'failed' && /bot check/i.test(s.detail)),
+  );
 });

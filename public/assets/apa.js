@@ -25,7 +25,9 @@
 //
 //   applyCase(title, mode) -> string
 //     mode 'sentence' | 'preserve'. Strips BibTeX brace groups in both modes;
-//     in 'sentence' mode lowercases words except: first word, first word after
+//     escaped braces \{ \} (passed through by bibtex.js) become literal { }
+//     and are treated as protected text. In 'sentence' mode lowercases words
+//     except: first word, first word after
 //     ": " / "? " / "! " / "— " / ". ", brace-protected spans, words with an uppercase
 //     letter after position 0 (acronyms, CamelCase), single uppercase letter words
 //     ("I", "X"). Proper nouns are NOT detected (impossible without a dictionary).
@@ -40,6 +42,7 @@
 //
 // Formatting rules by type (Google Scholar style for the italics):
 //   article-journal : Authors (Year). Title. *Journal*, *Vol*(Issue), pages. https://doi.org/…
+//                     (no journal/volume/issue/pages at all: Publisher stands in as the source, with a warning)
 //   paper-conference: Authors (Year). Title. In *Proceedings title* (pp. x–y). Publisher. DOI
 //                     (if volume/series present: In *Proceedings* (Vol. 30, pp. …))
 //   book            : Authors (Year). *Title* (ed. edition). Publisher. DOI
@@ -49,7 +52,8 @@
 //   preprint        : Authors (Year). Title. *arXiv preprint arXiv:1706.03762*.   (Scholar style)
 //                     — when no archive id: Authors (Year). *Title*. Archive/Publisher. DOI
 //   webpage         : Authors (Year, Month Day). *Title*. Site Name. Retrieved Month Day, Year, from URL
-//                     (if author == site name, omit site name; if no date -> (n.d.) and include retrieval date)
+//                     (if author == site name, omit site name; if no date -> (n.d.) and include retrieval date;
+//                     only the URL itself is a url segment — the "Retrieved …, from" prose is plain text)
 //   software/dataset: Authors (Year). *Title* (Version x) [Computer software / Data set]. Publisher. URL
 //   generic         : Authors (Year). *Title*. Publisher/Container. DOI/URL
 //
@@ -442,6 +446,10 @@ function formatEditorsDirect(parts) {
 
 /**
  * Remove BibTeX brace groups, remembering which characters were protected.
+ * Escaped braces (`\{`, `\}`, passed through by bibtex.js so they stay
+ * distinguishable from group delimiters) become literal brace characters and
+ * are marked protected so sentence-casing leaves them alone. Any other
+ * backslash is an ordinary character (titles are already LaTeX-decoded).
  * Stray closing braces are dropped.
  * @param {string} s
  * @returns {{ text: string, prot: boolean[] }}
@@ -452,6 +460,12 @@ function stripBraces(s) {
   let depth = 0;
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
+    if (ch === '\\' && (s[i + 1] === '{' || s[i + 1] === '}')) {
+      chars.push(s[i + 1]);
+      prot.push(true);
+      i++;
+      continue;
+    }
     if (ch === '{') { depth++; continue; }
     if (ch === '}') { if (depth > 0) depth--; continue; }
     chars.push(ch);
@@ -787,16 +801,20 @@ function titleExtras(ctx) {
   const version = str(r.version);
   switch (type) {
     case 'book': {
-      const items = [];
+      // APA 7: "(E. Editor, Ed.; 2nd ed., Vol. 2)" — a semicolon separates the
+      // editor element from the edition/volume element, a comma the latter two.
+      let editorItem = '';
       if (ctx.editors.length && !ctx.editorsAsAuthors) {
         const ed = formatEditorsDirect(ctx.editors);
-        items.push(`${ed.text}, ${ed.plural ? 'Eds.' : 'Ed.'}`);
+        editorItem = `${ed.text}, ${ed.plural ? 'Eds.' : 'Ed.'}`;
       }
+      const rest = [];
       const edition = formatEdition(r.edition);
-      if (edition) items.push(edition);
-      if (str(r.volume)) items.push(`Vol. ${str(r.volume)}`);
+      if (edition) rest.push(edition);
+      if (str(r.volume)) rest.push(`Vol. ${str(r.volume)}`);
+      const items = [editorItem, rest.join(', ')].filter(Boolean);
       if (!items.length) return [];
-      return [`(${items.join(items.length > 1 && items[0].includes('Ed') ? '; ' : ', ')})`];
+      return [`(${items.join('; ')})`];
     }
     case 'thesis': {
       const inst = str(r.institution) || str(r.publisher);
@@ -850,7 +868,10 @@ function publisherGroup(ctx, name) {
 }
 
 /**
- * Journal source: *Journal*, *Vol*(Issue), pages / Article N
+ * Journal source: *Journal*, *Vol*(Issue), pages / Article N.
+ * With no periodical data at all (e.g. Crossref's posted-content @article
+ * export, which only carries a publisher) the publisher stands in as the
+ * source, with a warning, instead of silently emitting nothing.
  * @param {Ctx} ctx
  * @returns {Segment[][]}
  */
@@ -871,7 +892,11 @@ function journalSource(ctx) {
     segs.push(plainSeg(`${sep()}(${issue})`));
   }
   if (locator) segs.push(plainSeg(`${sep()}${locator}`));
-  return segs.length ? [segs] : [];
+  if (!segs.length) {
+    if (str(r.publisher)) ctx.warnings.push('No journal, volume or pages found; using the publisher as the source');
+    return publisherGroup(ctx, str(r.publisher));
+  }
+  return [segs];
 }
 
 /**
@@ -992,27 +1017,30 @@ function buildSource(ctx) {
 }
 
 /**
- * Trailing DOI / URL (no period after it), or '' when none applies.
+ * Trailing DOI / URL (no period after it), or null when none applies.
+ * `prefix` is plain prose that precedes the URL ("Retrieved …, from " for web
+ * pages with an access date, '' otherwise); only `url` is flagged as a URL run.
  * @param {Ctx} ctx
- * @returns {string}
+ * @returns {{ prefix: string, url: string } | null}
  */
 function buildLocator(ctx) {
   const { r, opts } = ctx;
   const url = str(r.url);
+  const bare = (/** @type {string} */ u) => (u ? { prefix: '', url: u } : null);
   if (ctx.type === 'webpage') {
-    if (!url) return '';
+    if (!url) return null;
     const accessed = formatAccessDate(r.accessed);
-    return accessed ? `Retrieved ${accessed}, from ${url}` : url;
+    return { prefix: accessed ? `Retrieved ${accessed}, from ` : '', url };
   }
-  if (ctx.scholar) return '';
+  if (ctx.scholar) return null;
   const doi = cleanDoi(r.doi);
-  if (opts.includeDoi && doi) return `https://doi.org/${doi}`;
-  if (!opts.includeUrl) return '';
-  if (url) return url;
+  if (opts.includeDoi && doi) return bare(`https://doi.org/${doi}`);
+  if (!opts.includeUrl) return null;
+  if (url) return bare(url);
   const id = str(r.archiveId);
   const archive = str(r.archive) || (/^\d{4}\.\d{4,5}(v\d+)?$/.test(id) ? 'arXiv' : '');
-  if (ctx.type === 'preprint' && id && /^arxiv$/i.test(archive)) return `https://arxiv.org/abs/${id}`;
-  return '';
+  if (ctx.type === 'preprint' && id && /^arxiv$/i.test(archive)) return bare(`https://arxiv.org/abs/${id}`);
+  return null;
 }
 
 /**
@@ -1083,7 +1111,7 @@ function formatApa(ref, options) {
     segments.push(...withPeriod(g));
   });
   const locator = buildLocator(ctx);
-  if (locator) segments.push(plainSeg(' '), urlSeg(locator));
+  if (locator) segments.push(plainSeg(` ${locator.prefix}`), urlSeg(locator.url));
 
   const normalized = normalizeSegments(segments);
   return {
