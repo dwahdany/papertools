@@ -346,6 +346,7 @@ const turnstileConfig = (async () => {
 let turnstileApi = null;
 let turnstileWidget;              // the one widget id we keep and reset (tokens are single-use)
 let turnstilePending = null;      // { resolve, reject } of the token request in flight
+const TURNSTILE_TIMEOUT_MS = 20000; // give up on the bot check and continue with the other sources
 
 /** Load the Turnstile script once. */
 function loadTurnstile() {
@@ -377,7 +378,18 @@ async function turnstileToken() {
   const ts = await loadTurnstile();
   if (turnstilePending) turnstilePending.reject(new Error('superseded by a newer request'));
   return new Promise((resolve, reject) => {
-    turnstilePending = { resolve, reject };
+    const mine = {
+      resolve: (v) => { clearTimeout(timer); resolve(v); },
+      reject: (e) => { clearTimeout(timer); reject(e); },
+    };
+    const timer = setTimeout(() => {
+      if (turnstilePending === mine) {
+        turnstilePending = null;
+        turnstileHost.classList.remove('active');
+        reject(new Error('the bot check did not complete in time'));
+      }
+    }, TURNSTILE_TIMEOUT_MS);
+    turnstilePending = mine;
     turnstileHost.classList.add('active');
     if (turnstileWidget !== undefined) {
       ts.reset(turnstileWidget);
@@ -418,7 +430,12 @@ async function lookup(rawInput) {
   setStatus(`Looking up … ${describeIdentifier(identifier) || 'checking the input'}`, true);
 
   try {
-    const result = await resolveReference(query, { signal: controller.signal, metaToken: turnstileToken });
+    const metaToken = async () => {
+      const cfg = await turnstileConfig;
+      if (cfg) setStatus(`Looking up … ${describeIdentifier(identifier) || 'checking the input'} · completing the bot check`, true);
+      return turnstileToken();
+    };
+    const result = await resolveReference(query, { signal: controller.signal, metaToken });
     if (controller.signal.aborted) return;
     // Failed attempts are listed in the sources line; keep only the other notes as warnings.
     showReference(result.reference, userWarnings(result.warnings, result.sources));
