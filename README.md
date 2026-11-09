@@ -45,18 +45,23 @@ The repository deploys as a **Cloudflare Worker with static assets**: `wrangler.
 
 ### Protecting `/api/meta` with Turnstile
 
-The page fetcher only answers requests from the site itself and can additionally require a [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/) token. The check is off until both values are configured, so previews keep working:
+The page fetcher answers only requests from the site itself and requires a [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/) token once a secret is configured. The browser never talks to siteverify: the page obtains a token (widget action `fetch-page`, rendered with `appearance: interaction-only`, so nothing is shown unless Cloudflare needs an interaction) and sends it as the `cf-turnstile-response` header; `/api/meta` posts it to siteverify and requires `success === true`, the `fetch-page` action and a hostname from `TURNSTILE_HOSTNAMES` (default: the hostname the request was made to). Anything else is refused with HTTP 403. Tokens are single-use; the page resets its widget before every request.
 
-1. In the Cloudflare dashboard create a Turnstile widget for the site's hostname (widget mode *Managed* or *Invisible*; the page renders it with `appearance: interaction-only`, so nothing is shown unless Cloudflare needs an interaction).
-2. Set the **site key** as a plain variable and the **secret key** as an encrypted secret on the Worker:
+Configuration on the Worker:
+
+| Name | Where | Value |
+| --- | --- | --- |
+| `TURNSTILE_SITE_KEY` | `wrangler.toml` `[vars]` (public) | the widget's site key; `/api/config` hands it to the page. Without it the page skips the bot check. |
+| `TURNSTILE_SECRET` | Worker secret | the widget's secret key. Without it `/api/meta` skips verification (local previews keep working). |
+| `TURNSTILE_HOSTNAMES` | optional var | comma-separated frontend hostnames siteverify must report, e.g. a custom domain plus the `workers.dev` host. Never include `localhost` in production. |
+
+Store the secret with Wrangler (≥ 4.109) from your own machine, without pasting it anywhere. The pipeline reads the widget's secret from the Turnstile API and streams it straight into the Worker secret:
 
 ```bash
-npx wrangler secret put TURNSTILE_SECRET_KEY
+wrangler turnstile widget get 0x4AAAAAAF6VfSFXNsjPsl7V --json | jq -r '.secret' | wrangler secret put TURNSTILE_SECRET --name papertools
 ```
 
-and add `TURNSTILE_SITE_KEY` under *Settings → Variables* (or in `wrangler.toml` under `[vars]`; the site key is public). Cloudflare's test keys `1x00000000000000000000AA` / `1x0000000000000000000000000000000AA` always pass and are handy for local checks.
-
-The page reads `/api/config` to learn whether a site key is set, obtains a token silently, and sends it as the `cf-turnstile-response` header. `/api/meta` verifies it with the siteverify API and refuses requests with a missing or invalid token (HTTP 403).
+Then confirm with `wrangler secret list --name papertools`. The widget's domain list must include every hostname the site is served from (the `workers.dev` host and any custom domain; add `localhost` only on a separate widget for local testing).
 
 ## Layout
 

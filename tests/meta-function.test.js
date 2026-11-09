@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { handleMeta, handleConfig, isPublicHttpUrl, extractHead, pickCharset, decodeBytes, isSameOriginRequest, verifyTurnstile } from '../src/meta.js';
+import { handleMeta, handleConfig, isPublicHttpUrl, extractHead, pickCharset, decodeBytes, isSameOriginRequest, verifyTurnstile, expectedHostnames, TURNSTILE_ACTION } from '../src/meta.js';
 
 const page = (head, body = '<body><p>hi</p></body>') => `<!doctype html><html lang="en"><head>${head}</head>${body}</html>`;
 const enc = new TextEncoder();
@@ -331,9 +331,10 @@ function turnstileFetch(verifyResponder, pageHtml = page('<title>Guarded</title>
   };
   return { fetch, calls };
 }
-const okVerify = () => new Response(JSON.stringify({ success: true }), { headers: { 'content-type': 'application/json' } });
-const badVerify = () => new Response(JSON.stringify({ success: false, 'error-codes': ['invalid-input-response'] }), { headers: { 'content-type': 'application/json' } });
-const env = { TURNSTILE_SECRET_KEY: 'secret-123' };
+const verifyJson = (body) => () => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
+const okVerify = verifyJson({ success: true, action: TURNSTILE_ACTION, hostname: 'papertools.pages.dev' });
+const badVerify = verifyJson({ success: false, 'error-codes': ['invalid-input-response'] });
+const env = { TURNSTILE_SECRET: 'secret-123' };
 
 test('with a Turnstile secret configured, a missing token is refused with 403 and nothing is fetched', async () => {
   const { fetch, calls } = turnstileFetch(okVerify);
@@ -352,6 +353,7 @@ test('a valid Turnstile token (header or query) is verified with the secret and 
   assert.equal((await res.json()).ok, true);
   assert.equal(calls.length, 2);
   assert.equal(calls[0].init.method, 'POST');
+  assert.ok(calls[0].init.signal instanceof AbortSignal, 'siteverify call carries a timeout signal');
   const form = new URLSearchParams(String(calls[0].init.body));
   assert.equal(form.get('secret'), 'secret-123');
   assert.equal(form.get('response'), 'tok-abc');
@@ -360,6 +362,8 @@ test('a valid Turnstile token (header or query) is verified with the secret and 
 
   const viaQuery = await handleMeta(req('?url=https://example.com/post&turnstile=tok-q'), { fetch: turnstileFetch(okVerify).fetch, env });
   assert.equal(viaQuery.status, 200);
+  const legacyName = await handleMeta(req('?url=https://example.com/post&turnstile=tok-q'), { fetch: turnstileFetch(okVerify).fetch, env: { TURNSTILE_SECRET_KEY: 's' } });
+  assert.equal(legacyName.status, 200);
 });
 
 test('an invalid Turnstile token is refused with 403 and the error codes', async () => {
@@ -372,14 +376,39 @@ test('an invalid Turnstile token is refused with 403 and the error codes', async
   assert.equal(calls.length, 1);
 });
 
-test('an unreachable verification service yields 503, not a silent pass', async () => {
+test('a token for another action or another hostname is refused even when siteverify says success', async () => {
+  const wrongAction = turnstileFetch(verifyJson({ success: true, action: 'signup', hostname: 'papertools.pages.dev' }));
+  const r1 = await handleMeta(new Request(`${OWN}/api/meta?url=https://example.com/post`, { headers: { 'cf-turnstile-response': 't' } }), { fetch: wrongAction.fetch, env });
+  assert.equal(r1.status, 403);
+  assert.deepEqual((await r1.json()).details, ['action-mismatch']);
+  const wrongHost = turnstileFetch(verifyJson({ success: true, action: TURNSTILE_ACTION, hostname: 'evil.example' }));
+  const r2 = await handleMeta(new Request(`${OWN}/api/meta?url=https://example.com/post`, { headers: { 'cf-turnstile-response': 't' } }), { fetch: wrongHost.fetch, env });
+  assert.equal(r2.status, 403);
+  assert.deepEqual((await r2.json()).details, ['hostname-mismatch']);
+  // TURNSTILE_HOSTNAMES widens / replaces the allowlist.
+  const r3 = await handleMeta(new Request(`${OWN}/api/meta?url=https://example.com/post`, { headers: { 'cf-turnstile-response': 't' } }),
+    { fetch: turnstileFetch(verifyJson({ success: true, action: TURNSTILE_ACTION, hostname: 'papertools.example.org' })).fetch, env: { ...env, TURNSTILE_HOSTNAMES: 'papertools.example.org, www.papertools.example.org' } });
+  assert.equal(r3.status, 200);
+});
+
+test('over-long tokens are rejected without calling siteverify', async () => {
+  const { fetch, calls } = turnstileFetch(okVerify);
+  const res = await handleMeta(new Request(`${OWN}/api/meta?url=https://example.com/post`, { headers: { 'cf-turnstile-response': 'x'.repeat(2049) } }), { fetch, env });
+  assert.equal(res.status, 403);
+  assert.deepEqual((await res.json()).details, ['invalid-token-format']);
+  assert.equal(calls.length, 0);
+});
+
+test('an unreachable verification service is refused (403, code turnstile-unavailable), never a silent pass', async () => {
   const down = turnstileFetch(() => { throw new TypeError('fetch failed'); });
   const res = await handleMeta(new Request(`${OWN}/api/meta?url=https://example.com/post`, { headers: { 'cf-turnstile-response': 'tok' } }), { fetch: down.fetch, env });
-  assert.equal(res.status, 503);
+  assert.equal(res.status, 403);
   assert.equal((await res.json()).code, 'turnstile-unavailable');
+  assert.equal(down.calls.length, 1);
   const http500 = turnstileFetch(() => new Response('oops', { status: 500 }));
   const res2 = await handleMeta(new Request(`${OWN}/api/meta?url=https://example.com/post`, { headers: { 'cf-turnstile-response': 'tok' } }), { fetch: http500.fetch, env });
-  assert.equal(res2.status, 503);
+  assert.equal(res2.status, 403);
+  assert.equal((await res2.json()).code, 'turnstile-unavailable');
 });
 
 test('without a secret the Turnstile check is skipped', async () => {
@@ -389,15 +418,23 @@ test('without a secret the Turnstile check is skipped', async () => {
   assert.equal(calls.length, 1);
 });
 
-test('verifyTurnstile reports success, failure and unavailability', async () => {
-  assert.deepEqual(await verifyTurnstile('t', 's', null, okVerify), { ok: true, errors: [] });
-  assert.deepEqual(await verifyTurnstile('t', 's', null, badVerify), { ok: false, errors: ['invalid-input-response'] });
-  const unavailable = await verifyTurnstile('t', 's', null, async () => { throw new Error('boom'); });
+test('verifyTurnstile applies the canonical checks', async () => {
+  const hostnames = ['papertools.pages.dev'];
+  assert.deepEqual(await verifyTurnstile('t', 's', { hostnames, fetch: okVerify }), { ok: true, errors: [] });
+  assert.deepEqual(await verifyTurnstile('t', 's', { hostnames, fetch: badVerify }), { ok: false, errors: ['invalid-input-response'] });
+  assert.deepEqual(await verifyTurnstile('t', 's', { hostnames: [], fetch: okVerify }), { ok: false, errors: ['no-expected-hostnames'] });
+  assert.deepEqual(await verifyTurnstile('', 's', { hostnames, fetch: okVerify }), { ok: false, errors: ['invalid-token-format'] });
+  assert.deepEqual(await verifyTurnstile('t', 's', { hostnames, fetch: verifyJson({ success: true, action: TURNSTILE_ACTION, hostname: 'PaperTools.Pages.Dev' }) }), { ok: true, errors: [] });
+  const unavailable = await verifyTurnstile('t', 's', { hostnames, fetch: async () => { throw new Error('boom'); } });
   assert.equal(unavailable.unavailable, true);
 });
 
-test('handleConfig exposes the site key only when configured', async () => {
-  assert.deepEqual(await handleConfig({ TURNSTILE_SITE_KEY: '1x00000000000000000000AA' }).json(), { turnstileSiteKey: '1x00000000000000000000AA' });
-  assert.deepEqual(await handleConfig({}).json(), { turnstileSiteKey: null });
-  assert.deepEqual(await handleConfig().json(), { turnstileSiteKey: null });
+test('expectedHostnames falls back to the request host', () => {
+  assert.deepEqual(expectedHostnames({}, new URL('https://papertools.example.workers.dev/api/meta')), ['papertools.example.workers.dev']);
+  assert.deepEqual(expectedHostnames({ TURNSTILE_HOSTNAMES: 'a.example, b.example,' }, new URL('https://x/api/meta')), ['a.example', 'b.example']);
+});
+
+test('handleConfig exposes the site key and action only when configured', async () => {
+  assert.deepEqual(await handleConfig({ TURNSTILE_SITE_KEY: '1x00000000000000000000AA' }).json(), { turnstileSiteKey: '1x00000000000000000000AA', turnstileAction: TURNSTILE_ACTION });
+  assert.deepEqual(await handleConfig({}).json(), { turnstileSiteKey: null, turnstileAction: TURNSTILE_ACTION });
 });

@@ -11,5 +11,11 @@ run_worker_first = ["/api/*"]
 html_handling = "auto-trailing-slash"
 not_found_handling = "none"
 
+# Public Turnstile site key (the secret is set with `wrangler secret put TURNSTILE_SECRET`, never here).
+# TURNSTILE_HOSTNAMES (optional, comma-separated) overrides the hostnames siteverify must report;
+# by default the hostname the request was made to is required.
+[vars]
+TURNSTILE_SITE_KEY = "0x4AAAAAAF6VfSFXNsjPsl7V"
+
 [observability]
 enabled = true

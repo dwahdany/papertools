@@ -9,12 +9,15 @@
 // Access control:
 //   - same-origin only: a request that carries an Origin / Sec-Fetch-Site /
 //     Referer header pointing elsewhere is refused (403);
-//   - when env.TURNSTILE_SECRET_KEY is configured, every request must carry a
-//     Cloudflare Turnstile token (header cf-turnstile-response, or ?turnstile=)
-//     that verifies with the siteverify API; the client obtains it silently
+//   - when env.TURNSTILE_SECRET is configured (TURNSTILE_SECRET_KEY is accepted
+//     as an alias), every request must carry a Cloudflare Turnstile token
+//     (header cf-turnstile-response, or ?turnstile=) that verifies with the
+//     siteverify API with success === true, action === TURNSTILE_ACTION and a
+//     hostname in env.TURNSTILE_HOSTNAMES (comma-separated; defaults to the
+//     hostname this request was made to). The client obtains the token silently
 //     (see public/url-to-apa/app.js). Without the secret the check is skipped,
-//     so local previews keep working. GET /api/config tells the client whether
-//     a site key is configured.
+//     so local previews keep working. GET /api/config tells the client the site
+//     key (env.TURNSTILE_SITE_KEY) and the action to use.
 //
 // What the handler enforces on the fetch itself:
 //   - only public http(s) hosts, checked on the requested URL AND on every
@@ -32,8 +35,8 @@
 //   { ok: true,  url: <final URL after redirects>, status, contentType, head: "<head>…</head>" }
 //   { ok: false, error: "<message>", status?, contentType?, url? }
 //     HTTP 400  bad input (missing / non-public URL, or a redirect to a non-public address)
-//     HTTP 403  cross-origin request, or missing / invalid Turnstile token (code: 'turnstile-missing' | 'turnstile-failed')
-//     HTTP 503  Turnstile verification service unreachable (code: 'turnstile-unavailable')
+//     HTTP 403  cross-origin request, or missing / invalid Turnstile token (code: 'cross-origin' |
+//               'turnstile-missing' | 'turnstile-failed' | 'turnstile-unavailable' when siteverify itself failed)
 //     HTTP 415  the final response is not an HTML document
 //     HTTP 422  the document has no <head> metadata to relay
 //     HTTP 502  upstream failure (unreachable, timed out, non-2xx, too many redirects)
@@ -48,6 +51,10 @@ const USER_AGENT =
   'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
 
 const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+const TURNSTILE_VERIFY_TIMEOUT_MS = 10_000;
+const TURNSTILE_MAX_TOKEN_LENGTH = 2048;
+/** The widget action the client renders with; siteverify must echo it back. */
+export const TURNSTILE_ACTION = 'fetch-page';
 
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
@@ -75,26 +82,53 @@ export function isSameOriginRequest(request) {
 }
 
 /**
- * Verify a Turnstile token with Cloudflare's siteverify API.
- * @returns {Promise<{ ok: boolean, unavailable?: boolean, errors?: string[] }>}
+ * Verify a Turnstile token with Cloudflare's siteverify API (canonical flow:
+ * browser → this backend → siteverify). The token must verify with
+ * success === true, carry the expected action, and belong to one of the
+ * expected frontend hostnames.
+ * @param {string} token
+ * @param {string} secret
+ * @param {{ remoteIp?: string|null, action?: string, hostnames: Iterable<string>, fetch?: typeof fetch, verifyUrl?: string }} opts
+ * @returns {Promise<{ ok: boolean, unavailable?: boolean, errors: string[] }>}
  */
-export async function verifyTurnstile(token, secret, remoteIp, fetch = globalThis.fetch, verifyUrl = TURNSTILE_VERIFY_URL) {
+export async function verifyTurnstile(token, secret, opts = {}) {
+  const { remoteIp = null, action = TURNSTILE_ACTION, fetch = globalThis.fetch, verifyUrl = TURNSTILE_VERIFY_URL } = opts;
+  const hostnames = new Set([...(opts.hostnames || [])].map((h) => String(h).trim().toLowerCase()).filter(Boolean));
+  if (typeof token !== 'string' || token.length === 0 || token.length > TURNSTILE_MAX_TOKEN_LENGTH) {
+    return { ok: false, errors: ['invalid-token-format'] };
+  }
+  if (hostnames.size === 0) return { ok: false, errors: ['no-expected-hostnames'] };
   const form = new URLSearchParams({ secret, response: token });
   if (remoteIp) form.set('remoteip', remoteIp);
   let data;
   try {
-    const res = await fetch(verifyUrl, { method: 'POST', body: form, headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+    const res = await fetch(verifyUrl, {
+      method: 'POST',
+      body: form,
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      signal: AbortSignal.timeout(TURNSTILE_VERIFY_TIMEOUT_MS),
+    });
     if (!res.ok) return { ok: false, unavailable: true, errors: [`HTTP ${res.status}`] };
     data = await res.json();
   } catch (err) {
     return { ok: false, unavailable: true, errors: [err?.message || 'network error'] };
   }
-  return { ok: data?.success === true, errors: Array.isArray(data?.['error-codes']) ? data['error-codes'] : [] };
+  const errors = Array.isArray(data?.['error-codes']) ? [...data['error-codes']] : [];
+  if (data?.success !== true) return { ok: false, errors: errors.length ? errors : ['not-successful'] };
+  if (action && data.action !== action) errors.push('action-mismatch');
+  if (!hostnames.has(String(data.hostname || '').toLowerCase())) errors.push('hostname-mismatch');
+  return { ok: errors.length === 0, errors };
 }
 
-/** GET /api/config: tells the client whether Turnstile is configured. */
+/** Expected frontend hostnames: env.TURNSTILE_HOSTNAMES, else the host this request was made to. */
+export function expectedHostnames(env, requestUrl) {
+  const configured = String(env?.TURNSTILE_HOSTNAMES || '').split(',').map((h) => h.trim()).filter(Boolean);
+  return configured.length ? configured : [requestUrl.hostname];
+}
+
+/** GET /api/config: tells the client whether Turnstile is configured, and which action to render with. */
 export function handleConfig(env = {}) {
-  return json({ turnstileSiteKey: env.TURNSTILE_SITE_KEY || null }, 200, { 'cache-control': 'public, max-age=300' });
+  return json({ turnstileSiteKey: env.TURNSTILE_SITE_KEY || null, turnstileAction: TURNSTILE_ACTION }, 200, { 'cache-control': 'public, max-age=300' });
 }
 
 /** Reject URLs that point at non-public hosts (basic SSRF protection). */
@@ -256,14 +290,19 @@ export async function handleMeta(request, { fetch = globalThis.fetch, env = {}, 
   if (!isSameOriginRequest(request)) {
     return json({ ok: false, error: 'This endpoint only serves the papertools site itself.', code: 'cross-origin' }, 403);
   }
-  if (env.TURNSTILE_SECRET_KEY) {
+  const secret = env.TURNSTILE_SECRET || env.TURNSTILE_SECRET_KEY;
+  if (secret) {
     const token = request.headers.get('cf-turnstile-response') || requestUrl.searchParams.get('turnstile') || '';
     if (!token) {
       return json({ ok: false, error: 'Missing bot-check token. Reload the page and try again.', code: 'turnstile-missing' }, 403);
     }
-    const verdict = await verifyTurnstile(token, env.TURNSTILE_SECRET_KEY, request.headers.get('cf-connecting-ip'), fetch);
+    const verdict = await verifyTurnstile(token, secret, {
+      remoteIp: request.headers.get('cf-connecting-ip'),
+      hostnames: expectedHostnames(env, requestUrl),
+      fetch,
+    });
     if (verdict.unavailable) {
-      return json({ ok: false, error: 'The bot-check service could not be reached. Try again in a moment.', code: 'turnstile-unavailable' }, 503);
+      return json({ ok: false, error: 'The bot-check service could not be reached. Try again in a moment.', code: 'turnstile-unavailable' }, 403);
     }
     if (!verdict.ok) {
       return json({ ok: false, error: 'Bot check failed. Reload the page and try again.', code: 'turnstile-failed', details: verdict.errors }, 403);

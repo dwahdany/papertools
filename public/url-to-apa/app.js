@@ -331,19 +331,21 @@ function rememberQuery(query) {
 const TURNSTILE_SCRIPT = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=__papertoolsTurnstileReady';
 // Note: the host element must not be id="turnstile" — named window access would shadow the API global.
 const turnstileHost = $('#turnstile-host');
-/** @type {Promise<string|null>} resolves to the configured site key (null = Turnstile off). */
-const turnstileSiteKey = (async () => {
+/** @type {Promise<{ siteKey: string, action: string }|null>} the server's Turnstile config (null = off). */
+const turnstileConfig = (async () => {
   try {
     const res = await fetch(new URL('/api/config', location.origin), { headers: { Accept: 'application/json' } });
     if (!res.ok) return null;
     const cfg = await res.json();
-    return typeof cfg.turnstileSiteKey === 'string' && cfg.turnstileSiteKey ? cfg.turnstileSiteKey : null;
+    if (typeof cfg.turnstileSiteKey !== 'string' || !cfg.turnstileSiteKey) return null;
+    return { siteKey: cfg.turnstileSiteKey, action: typeof cfg.turnstileAction === 'string' ? cfg.turnstileAction : 'fetch-page' };
   } catch {
     return null; // static hosting without the Worker: no fetcher, no bot check
   }
 })();
 let turnstileApi = null;
-let turnstileWidget;
+let turnstileWidget;              // the one widget id we keep and reset (tokens are single-use)
+let turnstilePending = null;      // { resolve, reject } of the token request in flight
 
 /** Load the Turnstile script once. */
 function loadTurnstile() {
@@ -364,24 +366,37 @@ function loadTurnstile() {
 }
 
 /**
- * Obtain a fresh Turnstile token (tokens are single-use). Resolves to null
- * when Turnstile is not configured on this deployment. The widget renders
- * into #turnstile-host and only becomes visible if Cloudflare needs an interaction.
+ * Obtain a fresh Turnstile token (tokens are single-use, so the retained
+ * widget is reset before each request). Resolves to null when Turnstile is
+ * not configured on this deployment. The widget renders into #turnstile-host
+ * and only becomes visible if Cloudflare needs an interaction.
  */
 async function turnstileToken() {
-  const siteKey = await turnstileSiteKey;
-  if (!siteKey || !turnstileHost) return null;
+  const cfg = await turnstileConfig;
+  if (!cfg || !turnstileHost) return null;
   const ts = await loadTurnstile();
+  if (turnstilePending) turnstilePending.reject(new Error('superseded by a newer request'));
   return new Promise((resolve, reject) => {
-    const settle = (fn) => (value) => { turnstileHost.classList.remove('active'); fn(value); };
-    if (turnstileWidget !== undefined) { try { ts.remove(turnstileWidget); } catch { /* already gone */ } }
+    turnstilePending = { resolve, reject };
     turnstileHost.classList.add('active');
+    if (turnstileWidget !== undefined) {
+      ts.reset(turnstileWidget);
+      return;
+    }
+    const settle = (fn) => (value) => {
+      turnstileHost.classList.remove('active');
+      const pending = turnstilePending;
+      turnstilePending = null;
+      if (pending) pending[fn](value);
+    };
     turnstileWidget = ts.render(turnstileHost, {
-      sitekey: siteKey,
+      sitekey: cfg.siteKey,
+      action: cfg.action,
       appearance: 'interaction-only',
-      callback: settle(resolve),
-      'error-callback': settle(() => reject(new Error('the bot check could not be completed'))),
-      'unsupported-callback': settle(() => reject(new Error('this browser is not supported by the bot check'))),
+      callback: settle('resolve'),
+      'error-callback': () => settle('reject')(new Error('the bot check could not be completed')),
+      'expired-callback': () => { if (turnstileWidget !== undefined) ts.reset(turnstileWidget); },
+      'unsupported-callback': () => settle('reject')(new Error('this browser is not supported by the bot check')),
     });
   });
 }

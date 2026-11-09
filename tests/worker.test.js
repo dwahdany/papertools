@@ -20,7 +20,7 @@ test('/api/meta is handled by the worker', async () => {
 
 test('/api/config reports the Turnstile site key', async () => {
   const res = await worker.fetch(new Request('https://papertools.example/api/config'), env);
-  assert.deepEqual(await res.json(), { turnstileSiteKey: 'site-key' });
+  assert.deepEqual(await res.json(), { turnstileSiteKey: 'site-key', turnstileAction: 'fetch-page' });
   const none = await worker.fetch(new Request('https://papertools.example/api/config'), { ...env, TURNSTILE_SITE_KEY: undefined });
-  assert.deepEqual(await none.json(), { turnstileSiteKey: null });
+  assert.deepEqual(await none.json(), { turnstileSiteKey: null, turnstileAction: 'fetch-page' });
 });
